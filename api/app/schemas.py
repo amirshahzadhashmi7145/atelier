@@ -104,6 +104,7 @@ class TaskOut(BaseModel):
     depends_on: list[str]
     retry_count: int
     max_retries: int
+    branch_name: str | None = None
 
 
 class GateOut(BaseModel):

@@ -1,0 +1,26 @@
+"""Backend, frontend, and AI engineer prompts.
+
+Same runtime as the project manager. The difference is the prompt and
+the directory the orchestrator will allow the reply to touch.
+"""
+
+from app.agents.pm import JSON_RULES
+
+
+def implement_prompt(*, zone: str, task_key: str, title: str, description: str, ownership: str) -> tuple[str, str]:
+    system = (
+        "You are the "
+        + zone.replace("_", " ")
+        + " engineer. Implement only this task. "
+        "Write files inside your zone and stop. "
+        + JSON_RULES
+        + '\nShape: {"summary": string, "done": boolean, '
+        '"writes": [{"path": string, "content": string}]}'
+    )
+    user = (
+        f"Zone: {zone}\n"
+        f"Task: {task_key} {title}\n"
+        f"{description}\n\n"
+        f"Ownership:\n{ownership}"
+    )
+    return system, user
