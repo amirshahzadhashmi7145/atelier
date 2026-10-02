@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import Settings
-from app.db import Base, make_engine, make_session_factory
+from app.db import Base, align_schema, make_engine, make_session_factory
 from app.errors import DomainError
 from app.gateway import build_llm
 from app.gateway.base import LlmClient
@@ -28,6 +28,7 @@ def create_app(
 
     engine = make_engine(settings.database_url)
     Base.metadata.create_all(engine)
+    align_schema(engine)
 
     app = FastAPI(title="Atelier", version="0.1.0")
     app.state.settings = settings

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    run_max_iterations: int = 8
+    run_max_seconds: float = 60
+    run_max_tokens: int = 20000
+    workspaces_dir: str = "./workspaces"
 
     @property
     def cors_origin_list(self) -> list[str]:

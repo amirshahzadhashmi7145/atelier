@@ -28,6 +28,7 @@ coverage/
 *.db
 *.sqlite
 *.sqlite3
+workspaces/
 
 # Editor and agent
 .cursor/

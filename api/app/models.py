@@ -133,6 +133,7 @@ class Task(Base):
     requirement_keys: Mapped[list] = mapped_column(JSON)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=2)
+    branch_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     dependencies: Mapped[list["TaskDependency"]] = relationship(
         foreign_keys="TaskDependency.task_id",

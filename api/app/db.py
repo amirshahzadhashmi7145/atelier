@@ -8,7 +8,7 @@ Foreign keys are off by default in SQLite. We turn them on so a deleted
 project takes its requirements and tasks with it.
 """
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -39,3 +39,18 @@ def make_engine(url: str):
 
 def make_session_factory(engine: Engine):
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+def align_schema(engine: Engine) -> None:
+    """Add columns introduced after a database file already existed.
+
+    create_all builds missing tables. It does not alter an old table.
+    """
+
+    inspector = inspect(engine)
+    if not inspector.has_table("tasks"):
+        return
+    names = {column["name"] for column in inspector.get_columns("tasks")}
+    if "branch_name" not in names:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN branch_name VARCHAR(200)"))
