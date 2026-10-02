@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f3efe6;
+  --color-ink: #1c1915;
+  --color-muted: #6f675e;
+  --color-line: #e3dacd;
+  --color-oxide: #9a3412;
+  --color-oxide-soft: #f6ebe3;
+  --color-moss: #3f6212;
+  --color-moss-soft: #e8f0da;
+  --font-sans: var(--font-figtree), sans-serif;
+  --font-serif: var(--font-newsreader), serif;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

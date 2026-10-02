@@ -1,0 +1,557 @@
+"use client";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api, loadProject } from "@/lib/api";
+import type { Requirement, Snapshot } from "@/lib/types";
+
+const RAIL = [
+  { label: "Intake", hint: "The request, in your words", match: (stage: string) => stage === "intake" },
+  {
+    label: "Clarify",
+    hint: "Questions, then recorded assumptions",
+    match: (stage: string) => stage === "clarifying" || stage === "interpreted",
+  },
+  {
+    label: "Requirements",
+    hint: "Behaviour a test can fail",
+    match: (stage: string) => stage.startsWith("requirements"),
+  },
+  {
+    label: "Architecture",
+    hint: "Decisions and who owns which files",
+    match: (stage: string) => stage.startsWith("architecture"),
+  },
+  { label: "Tasks", hint: "Work, and what it waits on", match: (stage: string) => stage === "tasks_ready" },
+];
+
+export default function ProjectPage() {
+  const params = useParams<{ id: string }>();
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [editingInterpretation, setEditingInterpretation] = useState(false);
+  const [interpretation, setInterpretation] = useState("");
+  const [editingRequirement, setEditingRequirement] = useState<string | null>(null);
+
+  async function refresh() {
+    const next = await loadProject(params.id);
+    setSnapshot(next);
+    return next;
+  }
+
+  useEffect(() => {
+    refresh().catch((err: Error) => setError(err.message));
+    // The id is the only input. refresh closes over it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id]);
+
+  async function run(action: () => Promise<Snapshot>) {
+    setBusy(true);
+    setError("");
+    try {
+      setSnapshot(await action());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That step failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!snapshot) {
+    return <main className="mx-auto max-w-5xl px-6 py-16">{error || "Loading the project…"}</main>;
+  }
+
+  const { project } = snapshot;
+  const can = (action: string) => project.next_actions.includes(action);
+  const current = RAIL.findIndex((step) => step.match(project.stage));
+  const usingFake = snapshot.runs.some((run) => run.provider === "fake");
+
+  return (
+    <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
+      <aside>
+        <Link href="/" className="text-xs tracking-[0.22em] text-oxide uppercase">
+          Atelier
+        </Link>
+        <ol className="mt-8 space-y-5">
+          {RAIL.map((step, index) => (
+            <li key={step.label} className={index === current ? "text-ink" : "text-muted"}>
+              <p className="text-xs tracking-widest uppercase">{index < current ? "Done" : index === current ? "Now" : "Later"}</p>
+              <p className="font-serif text-xl">{step.label}</p>
+              <p className="text-sm">{step.hint}</p>
+            </li>
+          ))}
+        </ol>
+      </aside>
+
+      <div className="space-y-8">
+        <header>
+          <h1 className="font-serif text-4xl">{project.name}</h1>
+          <p className="mt-2 max-w-2xl text-muted">{project.description}</p>
+          {project.tech_preferences ? (
+            <p className="mt-2 text-sm text-muted">Preferences: {project.tech_preferences}</p>
+          ) : null}
+        </header>
+
+        {usingFake ? (
+          <p className="border border-line bg-oxide-soft px-4 py-3 text-sm">
+            This plan is coming from the local stand-in, not a model. The gates and the validators are
+            real. Set <code>LLM_PROVIDER=openai</code> and an API key when you want a model to write the plan.
+          </p>
+        ) : null}
+        {error ? <p className="text-sm text-oxide">{error}</p> : null}
+
+        <section className="border border-line bg-white/70 p-5">
+          <h2 className="font-serif text-2xl">Interpretation</h2>
+          <p className="mt-1 text-sm text-muted">The agent restates the request before anyone writes requirements. You can correct it.</p>
+          {project.interpretation ? (
+            editingInterpretation ? (
+              <div className="mt-4 space-y-3">
+                <textarea
+                  value={interpretation}
+                  onChange={(event) => setInterpretation(event.target.value)}
+                  rows={6}
+                  className="w-full border border-line bg-paper px-3 py-2"
+                />
+                <button
+                  type="button"
+                  disabled={busy || !can("edit_interpretation")}
+                  className="bg-ink px-3 py-2 text-sm text-paper"
+                  onClick={() =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/interpretation`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ interpretation }),
+                      }),
+                    ).then((next) => {
+                      setEditingInterpretation(false);
+                      return next;
+                    })
+                  }
+                >
+                  Save correction
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="mt-4 whitespace-pre-wrap leading-relaxed">{project.interpretation}</p>
+                {can("edit_interpretation") ? (
+                  <button
+                    type="button"
+                    className="mt-3 text-sm underline"
+                    onClick={() => {
+                      setInterpretation(project.interpretation ?? "");
+                      setEditingInterpretation(true);
+                    }}
+                  >
+                    Correct this
+                  </button>
+                ) : null}
+              </>
+            )
+          ) : (
+            <button
+              type="button"
+              disabled={busy || !can("interpret")}
+              className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
+              onClick={() => run(() => api(`/api/projects/${project.id}/interpret`, { method: "POST" }))}
+            >
+              {busy ? "Working…" : "Interpret the request"}
+            </button>
+          )}
+        </section>
+
+        {snapshot.clarifications.length > 0 ? (
+          <section className="border border-line bg-white/70 p-5">
+            <h2 className="font-serif text-2xl">Clarifications</h2>
+            <p className="mt-1 text-sm text-muted">
+              At most {project.max_questions} questions a round, and {project.max_rounds} rounds. After that the
+              agent records assumptions and moves on. Round {project.clarification_round}.
+            </p>
+            <ul className="mt-4 space-y-4">
+              {snapshot.clarifications.map((item) => (
+                <li key={item.id}>
+                  <p>{item.question}</p>
+                  <p className="text-sm text-muted">Settles: {item.resolves}</p>
+                  {item.status === "open" ? (
+                    <textarea
+                      value={answers[item.id] ?? ""}
+                      onChange={(event) => setAnswers({ ...answers, [item.id]: event.target.value })}
+                      rows={2}
+                      className="mt-2 w-full border border-line bg-paper px-3 py-2"
+                    />
+                  ) : (
+                    <p className="mt-1 text-sm">
+                      {item.status === "answered" ? item.answer : "Left unanswered. An assumption was recorded."}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {can("answer_clarifications") ? (
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="bg-ink px-3 py-2 text-sm text-paper"
+                  onClick={() =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/clarifications`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                          proceed: false,
+                          answers: snapshot.clarifications
+                            .filter((item) => item.status === "open")
+                            .map((item) => ({ id: item.id, answer: answers[item.id] ?? "" })),
+                        }),
+                      }),
+                    )
+                  }
+                >
+                  Save answers
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="border border-ink px-3 py-2 text-sm"
+                  onClick={() =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/clarifications`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                          proceed: true,
+                          answers: snapshot.clarifications
+                            .filter((item) => item.status === "open")
+                            .map((item) => ({ id: item.id, answer: answers[item.id] ?? "" })),
+                        }),
+                      }),
+                    )
+                  }
+                >
+                  Proceed on assumptions
+                </button>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {snapshot.assumptions.length > 0 ? (
+          <section className="border border-line bg-oxide-soft p-5">
+            <h2 className="font-serif text-2xl">Assumptions</h2>
+            <p className="mt-1 text-sm">These are visible on purpose. A wrong assumption can be corrected. A stalled project cannot.</p>
+            <ul className="mt-3 list-disc space-y-1 pl-5">
+              {snapshot.assumptions.map((item) => (
+                <li key={item.id}>{item.statement}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {can("generate_requirements") || snapshot.requirements.length > 0 ? (
+          <section className="border border-line bg-white/70 p-5">
+            <h2 className="font-serif text-2xl">Requirements</h2>
+            <p className="mt-1 text-sm text-muted">
+              Every functional requirement needs an acceptance criterion. Approval is a gate: the architecture
+              cannot start without it.
+            </p>
+            {can("generate_requirements") || can("rewrite_requirements") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
+                onClick={() => run(() => api(`/api/projects/${project.id}/requirements`, { method: "POST" }))}
+              >
+                {snapshot.requirements.length ? "Rewrite requirements" : "Write requirements"}
+              </button>
+            ) : null}
+            {snapshot.stories.length > 0 ? (
+              <ul className="mt-4 space-y-1 text-sm">
+                {snapshot.stories.map((story) => (
+                  <li key={story.id}>{story.statement}</li>
+                ))}
+              </ul>
+            ) : null}
+            <ul className="mt-4 space-y-4">
+              {snapshot.requirements.map((requirement) => (
+                <li key={requirement.id} className="border-t border-line pt-4">
+                  {editingRequirement === requirement.id ? (
+                    <RequirementForm
+                      initial={requirement}
+                      busy={busy}
+                      onCancel={() => setEditingRequirement(null)}
+                      onSave={(body) =>
+                        run(() =>
+                          api(`/api/projects/${project.id}/requirements/${requirement.id}`, {
+                            method: "PATCH",
+                            body: JSON.stringify(body),
+                          }),
+                        ).then((next) => {
+                          setEditingRequirement(null);
+                          return next;
+                        })
+                      }
+                    />
+                  ) : (
+                    <>
+                      <p className="text-xs tracking-widest text-muted uppercase">
+                        {requirement.key} · {requirement.kind.replaceAll("_", " ")}
+                      </p>
+                      <h3 className="font-serif text-xl">{requirement.title}</h3>
+                      <p className="mt-1">{requirement.statement}</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                        {requirement.criteria.map((criterion) => (
+                          <li key={criterion.id}>
+                            <span className="text-muted">{criterion.key}. </span>
+                            {criterion.statement}
+                          </li>
+                        ))}
+                      </ul>
+                      {can("edit_requirements") ? (
+                        <div className="mt-2 flex gap-3 text-sm">
+                          <button type="button" className="underline" onClick={() => setEditingRequirement(requirement.id)}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() =>
+                              run(() =>
+                                api(`/api/projects/${project.id}/requirements/${requirement.id}`, { method: "DELETE" }),
+                              )
+                            }
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {can("approve_requirements") ? (
+              <div className="mt-4">
+                <GateButtons
+                  busy={busy}
+                  gate="requirements"
+                  onDecide={(decision) =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/gates`, {
+                        method: "POST",
+                        body: JSON.stringify({ gate: "requirements", decision }),
+                      }),
+                    )
+                  }
+                />
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {can("generate_architecture") || snapshot.decisions.length > 0 ? (
+          <section className="border border-line bg-white/70 p-5">
+            <h2 className="font-serif text-2xl">Architecture</h2>
+            <p className="mt-1 text-sm text-muted">
+              Ownership says which directories an agent will be allowed to touch later. Two agents will not be
+              scheduled on the same paths.
+            </p>
+            {can("generate_architecture") || can("rewrite_architecture") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
+                onClick={() => run(() => api(`/api/projects/${project.id}/architecture`, { method: "POST" }))}
+              >
+                {snapshot.decisions.length ? "Rewrite architecture" : "Propose architecture"}
+              </button>
+            ) : null}
+            {project.architecture_summary ? <p className="mt-4 leading-relaxed">{project.architecture_summary}</p> : null}
+            {project.test_strategy ? (
+              <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
+                {Object.entries(project.test_strategy).map(([tier, command]) => (
+                  <div key={tier}>
+                    <dt className="text-muted uppercase tracking-widest text-xs">{tier}</dt>
+                    <dd className="font-mono text-sm">{command}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+            {snapshot.ownership.length > 0 ? (
+              <ul className="mt-4 space-y-1 text-sm">
+                {snapshot.ownership.map((rule) => (
+                  <li key={rule.id}>
+                    <span className="font-mono">{rule.glob}</span>
+                    <span className="text-muted"> belongs to </span>
+                    {rule.zone}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <ul className="mt-4 space-y-4">
+              {snapshot.decisions.map((decision) => (
+                <li key={decision.id} className="border-t border-line pt-4">
+                  <h3 className="font-serif text-xl">{decision.title}</h3>
+                  <p className="mt-1 text-sm">{decision.context}</p>
+                  <p className="mt-2 text-sm">
+                    <span className="text-muted">Chose: </span>
+                    {decision.decision}
+                  </p>
+                  <p className="mt-1 text-sm text-muted">{decision.consequences}</p>
+                </li>
+              ))}
+            </ul>
+            {can("approve_architecture") ? (
+              <div className="mt-4">
+                <GateButtons
+                  busy={busy}
+                  gate="architecture"
+                  onDecide={(decision) =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/gates`, {
+                        method: "POST",
+                        body: JSON.stringify({ gate: "architecture", decision }),
+                      }),
+                    )
+                  }
+                />
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {can("generate_tasks") || snapshot.tasks.length > 0 ? (
+          <section className="border border-line bg-white/70 p-5">
+            <h2 className="font-serif text-2xl">Tasks</h2>
+            <p className="mt-1 text-sm text-muted">
+              A task with unfinished dependencies is blocked. Ready means an agent could pick it up. This phase
+              does not run the agents.
+            </p>
+            {can("generate_tasks") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
+                onClick={() => run(() => api(`/api/projects/${project.id}/tasks`, { method: "POST" }))}
+              >
+                Break into tasks
+              </button>
+            ) : null}
+            {project.uncovered_requirement_keys.length > 0 ? (
+              <p className="mt-4 text-sm text-oxide">
+                No task covers {project.uncovered_requirement_keys.join(", ")}.
+              </p>
+            ) : null}
+            <ul className="mt-4 space-y-3">
+              {snapshot.tasks.map((task) => (
+                <li key={task.id} className="flex gap-4 border-t border-line pt-3">
+                  <span
+                    className={`mt-1 h-2 w-2 shrink-0 rounded-full ${task.state === "ready" ? "bg-moss" : "bg-muted"}`}
+                  />
+                  <div>
+                    <p className="text-xs tracking-widest text-muted uppercase">
+                      {task.key} · {task.state} · {task.zone} · size {task.size}
+                    </p>
+                    <h3 className="font-serif text-xl">{task.title}</h3>
+                    <p className="text-sm">{task.description}</p>
+                    <p className="mt-1 text-sm text-muted">
+                      Covers {task.requirement_keys.join(", ")}
+                      {task.depends_on.length ? ` · waits on ${task.depends_on.join(", ")}` : " · nothing blocks it"}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        <section>
+          <h2 className="font-serif text-2xl">What happened</h2>
+          <p className="mt-1 text-sm text-muted">An append-only log. The plan can be reconstructed from these events.</p>
+          <ol className="mt-4 space-y-2 text-sm">
+            {snapshot.events.map((event) => (
+              <li key={event.id} className="grid grid-cols-[9rem_1fr] gap-3 border-t border-line py-2">
+                <time className="text-muted">{new Date(event.occurred_at).toLocaleTimeString()}</time>
+                <span>
+                  {event.type.replaceAll(".", " · ")}
+                  <span className="text-muted"> · {event.actor_role ?? event.actor_kind}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function GateButtons({
+  busy,
+  gate,
+  onDecide,
+}: {
+  busy: boolean;
+  gate: string;
+  onDecide: (decision: "approved" | "rejected") => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      <button type="button" disabled={busy} className="bg-moss px-3 py-2 text-sm text-white" onClick={() => onDecide("approved")}>
+        Approve {gate}
+      </button>
+      <button type="button" disabled={busy} className="border border-ink px-3 py-2 text-sm" onClick={() => onDecide("rejected")}>
+        Send back
+      </button>
+    </div>
+  );
+}
+
+function RequirementForm({
+  initial,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  initial: Requirement;
+  busy: boolean;
+  onSave: (body: { kind: Requirement["kind"]; title: string; statement: string; criteria: string[] }) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(initial.title);
+  const [statement, setStatement] = useState(initial.statement);
+  const [criteria, setCriteria] = useState(initial.criteria.map((item) => item.statement).join("\n"));
+  return (
+    <div className="space-y-2">
+      <input value={title} onChange={(event) => setTitle(event.target.value)} className="w-full border border-line bg-paper px-3 py-2" />
+      <textarea value={statement} onChange={(event) => setStatement(event.target.value)} rows={3} className="w-full border border-line bg-paper px-3 py-2" />
+      <textarea
+        value={criteria}
+        onChange={(event) => setCriteria(event.target.value)}
+        rows={4}
+        className="w-full border border-line bg-paper px-3 py-2"
+        placeholder="One acceptance criterion per line"
+      />
+      <div className="flex gap-3">
+        <button
+          type="button"
+          disabled={busy}
+          className="bg-ink px-3 py-2 text-sm text-paper"
+          onClick={() =>
+            onSave({
+              kind: initial.kind,
+              title,
+              statement,
+              criteria: criteria.split("\n").map((line) => line.trim()).filter(Boolean),
+            })
+          }
+        >
+          Save requirement
+        </button>
+        <button type="button" className="text-sm underline" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
