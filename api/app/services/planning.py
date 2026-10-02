@@ -40,6 +40,7 @@ from app.models import (
 from app.schemas import (
     AssumptionOut,
     ClarificationOut,
+    CheckOut,
     CriterionOut,
     DecisionOut,
     DefectOut,
@@ -281,6 +282,17 @@ class PlanningService:
                     expected=item.expected,
                 )
                 for item in project.defects
+            ],
+            checks=[
+                CheckOut(
+                    id=item.id,
+                    task_id=item.task_id,
+                    tier=item.tier,
+                    command=item.command,
+                    exit_code=item.exit_code,
+                    excerpt=item.excerpt,
+                )
+                for item in sorted(project.checks, key=lambda item: item.tier)
             ],
             gates=[
                 GateOut(

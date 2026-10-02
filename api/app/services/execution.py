@@ -22,7 +22,8 @@ from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
-from app.models import AgentRun, CriterionFinding, Defect, Event, Project, Task
+from app.models import AgentRun, CheckRun, CriterionFinding, Defect, Event, Project, Task
+from app.services.checks import CheckResult, run_checks
 from app.schemas import ProjectSnapshot
 from app.services.planning import PlanningService, new_id
 from app.services.workspace import Workspace
@@ -76,14 +77,40 @@ class ExecutionService:
         if not task.branch_name:
             raise DomainError("This task has no branch to review.")
         criteria = self._criteria(project, task)
+        workspace = Workspace(self._root(project))
         try:
-            diff = Workspace(self._root(project)).diff(task.branch_name)
+            diff = workspace.diff(task.branch_name)
+            workspace.start_branch(task.branch_name)
         except RuntimeError as exc:
             raise DomainError(f"The branch diff could not be read: {exc}") from exc
+        checks = run_checks(workspace.root, project.test_strategy, self.settings.check_timeout_seconds)
+        self._replace_checks(project, task, checks)
+        failed_checks = [item for item in checks if item.exit_code != 0]
+        if failed_checks:
+            self._send_back(
+                project,
+                task,
+                [
+                    (
+                        f"tests/{item.tier}",
+                        item.command,
+                        item.excerpt or f"The command exited {item.exit_code}.",
+                        "The command exits 0.",
+                    )
+                    for item in failed_checks
+                ],
+                "; ".join(f"{item.tier} exited {item.exit_code}" for item in failed_checks)
+                + ". The task is ready for another attempt.",
+            )
+            return self.planning.snapshot(project.id)
+        rendered = "\n".join(
+            f"- {item.tier}: {item.command} exited {item.exit_code}\n  {item.excerpt}" for item in checks
+        )
         system, user = review_prompt(
             task_key=task.key,
             title=task.title,
             criteria=criteria,
+            checks=rendered,
             diff=diff,
         )
         result = self.llm.complete_json(purpose="qa", system=system, user=user)
@@ -134,30 +161,19 @@ class ExecutionService:
             )
         elif verdict == "fail":
             failed = [item for item in findings if item.result == "fail"]
-            for item in failed:
-                self.session.add(
-                    Defect(
-                        id=new_id("def"),
-                        project_id=project.id,
-                        task_id=task.id,
-                        criterion_key=item.criterion_key,
-                        reproduction=item.reproduction.strip(),
-                        observed=item.observed.strip(),
-                        expected=item.expected.strip(),
-                    )
-                )
-            task.state, task.retry_count = self._move(task, TaskState.CHANGES_REQUESTED)
-            task.state, task.retry_count = self._move(task, TaskState.READY)
-            self.planning._event(
+            self._send_back(
                 project,
-                "qa.failed",
-                actor_kind="agent",
-                actor_role="qa",
-                task_id=task.id,
-                payload={
-                    "key": task.key,
-                    "summary": f"{len(failed)} criteria failed. The task is ready for another attempt.",
-                },
+                task,
+                [
+                    (
+                        item.criterion_key,
+                        item.reproduction.strip(),
+                        item.observed.strip(),
+                        item.expected.strip(),
+                    )
+                    for item in failed
+                ],
+                f"{len(failed)} criteria failed. The task is ready for another attempt.",
             )
         else:
             flagged = [item.criterion_key for item in findings if item.result == "untestable"]
@@ -365,6 +381,45 @@ class ExecutionService:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
+        )
+
+    def _replace_checks(self, project: Project, task: Task, checks: list[CheckResult]) -> None:
+        self.session.execute(delete(CheckRun).where(CheckRun.task_id == task.id))
+        for item in checks:
+            self.session.add(
+                CheckRun(
+                    id=new_id("chk"),
+                    project_id=project.id,
+                    task_id=task.id,
+                    tier=item.tier,
+                    command=item.command,
+                    exit_code=item.exit_code,
+                    excerpt=item.excerpt,
+                )
+            )
+
+    def _send_back(self, project: Project, task: Task, rows: list[tuple[str, str, str, str]], summary: str) -> None:
+        for criterion_key, reproduction, observed, expected in rows:
+            self.session.add(
+                Defect(
+                    id=new_id("def"),
+                    project_id=project.id,
+                    task_id=task.id,
+                    criterion_key=criterion_key,
+                    reproduction=reproduction,
+                    observed=observed,
+                    expected=expected,
+                )
+            )
+        task.state, task.retry_count = self._move(task, TaskState.CHANGES_REQUESTED)
+        task.state, task.retry_count = self._move(task, TaskState.READY)
+        self.planning._event(
+            project,
+            "qa.failed",
+            actor_kind="agent",
+            actor_role="qa",
+            task_id=task.id,
+            payload={"key": task.key, "summary": summary},
         )
 
     def _criteria(self, project: Project, task: Task) -> list[tuple[str, str]]:

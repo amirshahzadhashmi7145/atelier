@@ -82,6 +82,8 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert reviewed.status_code == 200, reviewed.text
     assert _by_key(reviewed.json(), "TASK-001")["state"] == "gated"
     assert reviewed.json()["findings"]
+    assert {item["tier"] for item in reviewed.json()["checks"]} == {"unit", "integration", "ui"}
+    assert all(item["exit_code"] == 0 for item in reviewed.json()["checks"])
 
     accepted = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/accept")
     assert accepted.status_code == 200, accepted.text
@@ -217,6 +219,45 @@ def test_qa_cannot_change_the_branch(tmp_path: Path):
     assert (tmp_path / project_id / "server" / "app.py").read_text() == before
 
 
+def test_a_failing_test_command_blocks_a_pass(tmp_path: Path):
+    llm = _BrokenUnitTests()
+    client = client_for(tmp_path, llm)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    body = reviewed.json()
+    assert _by_key(body, "TASK-001")["state"] == "ready"
+    assert llm.qa_calls == 0
+    unit = next(item for item in body["checks"] if item["tier"] == "unit")
+    assert unit["exit_code"] == 2
+    defect = next(item for item in body["defects"] if item["criterion_key"] == "tests/unit")
+    assert defect["reproduction"].startswith("python3")
+    assert "The command exits 0." == defect["expected"]
+    log = subprocess.run(
+        ["git", "log", "main", "--oneline"],
+        cwd=tmp_path / project_id,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "TASK-001" not in log.stdout
+
+
+def test_a_chained_test_command_does_not_run(tmp_path: Path):
+    client = client_for(tmp_path, _ChainedTest())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 422
+    body = client.get(f"/api/projects/{project_id}").json()
+    assert _by_key(body, "TASK-001")["state"] == "in_review"
+    assert body["checks"] == []
+    assert not (tmp_path / project_id / "chained.txt").exists()
+
+
 def test_the_review_prompt_states_criteria_before_the_diff():
     from app.agents.qa import review_prompt
 
@@ -224,9 +265,31 @@ def test_the_review_prompt_states_criteria_before_the_diff():
         task_key="TASK-001",
         title="Persist",
         criteria=[("FR-001/AC-1", "A missing session returns 401.")],
+        checks="- unit: python3 -c \"print('unit ok')\" exited 0",
         diff="diff --git a/server/app.py",
     )
-    assert user.index("Criteria:") < user.index("Diff:")
+    assert user.index("Criteria:") < user.index("Test results:") < user.index("Diff:")
+
+
+class _BrokenUnitTests(FakeLlm):
+    def __init__(self) -> None:
+        self.qa_calls = 0
+
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "qa":
+            self.qa_calls += 1
+        result = super().complete_json(purpose=purpose, system=system, user=user)
+        if purpose == "architecture":
+            result.data["test_strategy"]["unit"] = 'python3 -c "import sys; sys.exit(2)"'
+        return result
+
+
+class _ChainedTest(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        result = super().complete_json(purpose=purpose, system=system, user=user)
+        if purpose == "architecture":
+            result.data["test_strategy"]["unit"] = "python3 -c \"print('ok')\" && touch chained.txt"
+        return result
 
 
 class _FailFirstCriterion(FakeLlm):

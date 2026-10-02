@@ -431,8 +431,9 @@ export default function ProjectPage() {
             <h2 className="font-serif text-2xl">Tasks</h2>
             <p className="mt-1 text-sm text-muted">
               Ready means the orchestrator may claim it. The agent writes only inside its zone, on a branch.
-              Review checks that branch against the acceptance criteria. Accepting a passed review merges it
-              and unblocks whatever was waiting.
+              Review runs the architecture&apos;s test commands on that branch, then checks the acceptance
+              criteria. A failing command sends the task back. Accepting a passed review merges it and
+              unblocks whatever was waiting.
             </p>
             {can("run_ready") ? (
               <button
@@ -499,6 +500,14 @@ export default function ProjectPage() {
                       </button>
                     ) : null}
                     <ul className="mt-2 space-y-1 text-sm">
+                      {snapshot.checks
+                        .filter((check) => check.task_id === task.id)
+                        .map((check) => (
+                          <li key={check.id} className={check.exit_code === 0 ? "text-muted" : "text-oxide"}>
+                            {check.tier} · exit {check.exit_code} · {check.command}
+                            {check.excerpt ? ` — ${check.excerpt}` : ""}
+                          </li>
+                        ))}
                       {snapshot.findings
                         .filter((finding) => finding.task_id === task.id)
                         .map((finding) => (
