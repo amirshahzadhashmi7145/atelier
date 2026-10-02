@@ -13,6 +13,7 @@ def review_prompt(
     task_key: str,
     title: str,
     criteria: list[tuple[str, str]],
+    checks: str,
     diff: str,
 ) -> tuple[str, str]:
     listed = "\n".join(f"- {key}: {statement}" for key, statement in criteria)
@@ -28,6 +29,8 @@ def review_prompt(
         f"Task: {task_key} {title}\n\n"
         "Criteria:\n"
         f"{listed}\n\n"
+        "Test results:\n"
+        f"{checks}\n\n"
         "Diff:\n"
         f"{diff}"
     )

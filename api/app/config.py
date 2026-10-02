@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     run_max_iterations: int = 8
     run_max_seconds: float = 60
     run_max_tokens: int = 20000
+    check_timeout_seconds: int = 20
     workspaces_dir: str = "./workspaces"
 
     @property
