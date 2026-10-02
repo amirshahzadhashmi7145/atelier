@@ -1,0 +1,38 @@
+# Planning documents stay local. Do not publish markdown.
+*.md
+docs/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+
+# Editor and agent
+.cursor/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
