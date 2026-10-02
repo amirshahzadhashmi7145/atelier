@@ -122,9 +122,9 @@ def _architecture(user: str) -> dict:
             "client may import but not edit."
         ),
         "test_strategy": {
-            "unit": "pytest",
-            "integration": "pytest -m integration",
-            "ui": "npm test",
+            "unit": "python3 -c \"print('unit ok')\"",
+            "integration": "python3 -c \"print('integration ok')\"",
+            "ui": "python3 -c \"print('ui ok')\"",
         },
         "ownership": ownership,
         "decisions": [
@@ -175,7 +175,7 @@ def _qa(user: str) -> dict:
         if line == "Criteria:":
             reading = True
             continue
-        if line == "Diff:":
+        if line in {"Test results:", "Diff:"}:
             break
         if reading and line.startswith("- "):
             keys.append(line[2:].split(":", 1)[0].strip())

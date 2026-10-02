@@ -124,6 +124,15 @@ class DefectOut(BaseModel):
     expected: str
 
 
+class CheckOut(BaseModel):
+    id: str
+    task_id: str
+    tier: str
+    command: str
+    exit_code: int
+    excerpt: str
+
+
 class GateOut(BaseModel):
     id: str
     gate: str
@@ -181,6 +190,7 @@ class ProjectSnapshot(BaseModel):
     tasks: list[TaskOut]
     findings: list[FindingOut]
     defects: list[DefectOut]
+    checks: list[CheckOut]
     gates: list[GateOut]
     events: list[EventOut]
     runs: list[RunOut]

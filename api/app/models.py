@@ -44,6 +44,7 @@ class Project(Base):
     tasks: Mapped[list["Task"]] = relationship(cascade="all, delete-orphan")
     findings: Mapped[list["CriterionFinding"]] = relationship(cascade="all, delete-orphan")
     defects: Mapped[list["Defect"]] = relationship(cascade="all, delete-orphan")
+    checks: Mapped[list["CheckRun"]] = relationship(cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(cascade="all, delete-orphan")
     gates: Mapped[list["GateDecision"]] = relationship(cascade="all, delete-orphan")
     runs: Mapped[list["AgentRun"]] = relationship(cascade="all, delete-orphan")
@@ -172,6 +173,18 @@ class Defect(Base):
     reproduction: Mapped[str] = mapped_column(Text)
     observed: Mapped[str] = mapped_column(Text)
     expected: Mapped[str] = mapped_column(Text)
+
+
+class CheckRun(Base):
+    __tablename__ = "check_runs"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    tier: Mapped[str] = mapped_column(String(20))
+    command: Mapped[str] = mapped_column(String(400))
+    exit_code: Mapped[int] = mapped_column(Integer)
+    excerpt: Mapped[str] = mapped_column(Text, default="")
 
 
 class AgentRun(Base):
