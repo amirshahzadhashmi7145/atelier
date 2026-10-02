@@ -9,6 +9,7 @@ because the failure is the record a person needs to see.
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.agents.developer import implement_prompt
@@ -85,7 +86,17 @@ class ExecutionService:
         if chosen is None:
             raise DomainError("No task is ready to run.")
         task = next(item for item in project.tasks if item.key == chosen)
-        task.state, task.retry_count = self._move(task, TaskState.IN_PROGRESS)
+        # The state change is committed before any file is written, so a second
+        # click sees the task as in progress and does not start it again.
+        claimed = self.session.execute(
+            update(Task)
+            .where(Task.id == task.id, Task.state == TaskState.READY.value)
+            .values(state=TaskState.IN_PROGRESS.value)
+        )
+        if claimed.rowcount != 1:
+            raise DomainError("That task was already claimed.")
+        self.session.commit()
+        task.state = TaskState.IN_PROGRESS.value
         self.planning._event(
             project,
             "task.claimed",

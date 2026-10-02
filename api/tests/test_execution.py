@@ -84,6 +84,18 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert "create_record" in (tmp_path / project_id / "server" / "app.py").read_text()
 
 
+def test_a_task_in_review_is_not_claimed_again(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    first = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert first.status_code == 200, first.text
+    second = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert second.status_code == 409
+    body = client.get(f"/api/projects/{project_id}").json()
+    assert _by_key(body, "TASK-001")["state"] == "in_review"
+    assert _by_key(body, "TASK-001")["retry_count"] == 0
+
+
 def test_a_write_outside_the_zone_is_not_saved(tmp_path: Path):
     client = client_for(tmp_path, _OutsideZone())
     project_id = _prepare(client)

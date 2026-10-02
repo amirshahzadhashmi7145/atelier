@@ -55,6 +55,11 @@ export default function ProjectPage() {
       setSnapshot(await action());
     } catch (err) {
       setError(err instanceof Error ? err.message : "That step failed.");
+      try {
+        setSnapshot(await loadProject(params.id));
+      } catch {
+        // The error above is the one to show.
+      }
     } finally {
       setBusy(false);
     }
