@@ -64,6 +64,21 @@ export type Snapshot = {
   }[];
   ownership: { id: string; glob: string; zone: string }[];
   tasks: Task[];
+  findings: {
+    id: string;
+    task_id: string;
+    criterion_key: string;
+    result: string;
+    note: string;
+  }[];
+  defects: {
+    id: string;
+    task_id: string;
+    criterion_key: string;
+    reproduction: string;
+    observed: string;
+    expected: string;
+  }[];
   gates: { id: string; gate: string; decision: string; note: string | null; created_at: string }[];
   events: {
     id: string;

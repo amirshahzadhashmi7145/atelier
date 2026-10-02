@@ -431,7 +431,8 @@ export default function ProjectPage() {
             <h2 className="font-serif text-2xl">Tasks</h2>
             <p className="mt-1 text-sm text-muted">
               Ready means the orchestrator may claim it. The agent writes only inside its zone, on a branch.
-              Accepting the branch merges it and unblocks whatever was waiting.
+              Review checks that branch against the acceptance criteria. Accepting a passed review merges it
+              and unblocks whatever was waiting.
             </p>
             {can("run_ready") ? (
               <button
@@ -477,6 +478,18 @@ export default function ProjectPage() {
                       <button
                         type="button"
                         disabled={busy}
+                        className="mt-2 bg-ink px-3 py-2 text-sm text-paper"
+                        onClick={() =>
+                          run(() => api(`/api/projects/${project.id}/tasks/${task.id}/review`, { method: "POST" }))
+                        }
+                      >
+                        Review against the criteria
+                      </button>
+                    ) : null}
+                    {task.state === "gated" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
                         className="mt-2 bg-moss px-3 py-2 text-sm text-white"
                         onClick={() =>
                           run(() => api(`/api/projects/${project.id}/tasks/${task.id}/accept`, { method: "POST" }))
@@ -485,6 +498,24 @@ export default function ProjectPage() {
                         Accept and merge
                       </button>
                     ) : null}
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {snapshot.findings
+                        .filter((finding) => finding.task_id === task.id)
+                        .map((finding) => (
+                          <li key={finding.id}>
+                            {finding.criterion_key} · {finding.result}
+                            {finding.note ? ` — ${finding.note}` : ""}
+                          </li>
+                        ))}
+                      {snapshot.defects
+                        .filter((defect) => defect.task_id === task.id)
+                        .map((defect) => (
+                          <li key={defect.id} className="text-oxide">
+                            {defect.criterion_key}: expected {defect.expected}, observed {defect.observed}. Reproduce:{" "}
+                            {defect.reproduction}
+                          </li>
+                        ))}
+                    </ul>
                   </div>
                 </li>
               ))}
@@ -515,7 +546,7 @@ export default function ProjectPage() {
 }
 
 function dotClass(state: string): string {
-  if (state === "ready" || state === "done") return "bg-moss";
+  if (state === "ready" || state === "done" || state === "gated") return "bg-moss";
   if (state === "blocked") return "bg-muted";
   return "bg-oxide";
 }

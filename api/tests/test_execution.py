@@ -75,6 +75,14 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     written = tmp_path / project_id / "server" / "app.py"
     assert "create_record" in written.read_text()
 
+    too_soon = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/accept")
+    assert too_soon.status_code == 409
+
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    assert _by_key(reviewed.json(), "TASK-001")["state"] == "gated"
+    assert reviewed.json()["findings"]
+
     accepted = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/accept")
     assert accepted.status_code == 200, accepted.text
     body = accepted.json()
@@ -143,6 +151,127 @@ def test_a_retry_reuses_the_same_branch(tmp_path: Path):
         text=True,
     )
     assert listed.stdout.count("task/TASK-001") == 1
+
+
+def test_a_failed_review_sends_the_task_back_with_a_defect(tmp_path: Path):
+    client = client_for(tmp_path, _FailFirstCriterion())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    body = reviewed.json()
+    assert _by_key(body, "TASK-001")["state"] == "ready"
+    assert body["defects"][0]["expected"] == "401"
+    assert body["defects"][0]["observed"] == "201"
+    log = subprocess.run(
+        ["git", "log", "main", "--oneline"],
+        cwd=tmp_path / project_id,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "TASK-001" not in log.stdout
+
+    again = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert again.status_code == 200, again.text
+    assert _by_key(again.json(), "TASK-001")["state"] == "in_review"
+    assert "revised after review" in (tmp_path / project_id / "server" / "app.py").read_text()
+    passed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert _by_key(passed.json(), "TASK-001")["state"] == "gated"
+
+
+def test_an_untestable_criterion_stays_in_review(tmp_path: Path):
+    client = client_for(tmp_path, _Untestable())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    assert _by_key(reviewed.json(), "TASK-001")["state"] == "in_review"
+    assert reviewed.json()["findings"][0]["result"] == "untestable"
+    accepted = client.post(f"/api/projects/{project_id}/tasks/{task_id}/accept")
+    assert accepted.status_code == 409
+
+
+def test_a_review_that_skips_a_criterion_records_nothing(tmp_path: Path):
+    client = client_for(tmp_path, _DropsACriterion())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 502
+    body = client.get(f"/api/projects/{project_id}").json()
+    assert _by_key(body, "TASK-001")["state"] == "in_review"
+    assert body["findings"] == []
+
+
+def test_qa_cannot_change_the_branch(tmp_path: Path):
+    client = client_for(tmp_path, _QaTriesToWrite())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    before = (tmp_path / project_id / "server" / "app.py").read_text()
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    assert (tmp_path / project_id / "server" / "app.py").read_text() == before
+
+
+def test_the_review_prompt_states_criteria_before_the_diff():
+    from app.agents.qa import review_prompt
+
+    _system, user = review_prompt(
+        task_key="TASK-001",
+        title="Persist",
+        criteria=[("FR-001/AC-1", "A missing session returns 401.")],
+        diff="diff --git a/server/app.py",
+    )
+    assert user.index("Criteria:") < user.index("Diff:")
+
+
+class _FailFirstCriterion(FakeLlm):
+    def __init__(self) -> None:
+        self.reviews = 0
+
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "qa":
+            self.reviews += 1
+            result = super().complete_json(purpose=purpose, system=system, user=user)
+            if self.reviews == 1:
+                result.data["findings"][0]["result"] = "fail"
+                result.data["findings"][0]["reproduction"] = "POST /records with no session"
+                result.data["findings"][0]["observed"] = "201"
+                result.data["findings"][0]["expected"] = "401"
+            return result
+        return super().complete_json(purpose=purpose, system=system, user=user)
+
+
+class _Untestable(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "qa":
+            result = super().complete_json(purpose=purpose, system=system, user=user)
+            result.data["findings"][0]["result"] = "untestable"
+            result.data["findings"][0]["note"] = "No clock is available in this run."
+            return result
+        return super().complete_json(purpose=purpose, system=system, user=user)
+
+
+class _DropsACriterion(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "qa":
+            result = super().complete_json(purpose=purpose, system=system, user=user)
+            result.data["findings"] = result.data["findings"][:1]
+            return result
+        return super().complete_json(purpose=purpose, system=system, user=user)
+
+
+class _QaTriesToWrite(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "qa":
+            result = super().complete_json(purpose=purpose, system=system, user=user)
+            result.data["writes"] = [{"path": "server/app.py", "content": "hacked\n"}]
+            return result
+        return super().complete_json(purpose=purpose, system=system, user=user)
 
 
 class _OutsideZone(FakeLlm):

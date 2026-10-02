@@ -43,6 +43,9 @@ class Workspace:
         message = f"{key}: {summary}".replace("\n", " ")
         self._git("commit", "-m", message)
 
+    def diff(self, branch: str) -> str:
+        return self._git("diff", f"main...{branch}")
+
     def merge(self, branch: str, key: str) -> None:
         self._git("checkout", "main")
         self._git("merge", "--no-ff", branch, "-m", f"Accept {key}.")

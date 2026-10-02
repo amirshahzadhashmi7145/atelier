@@ -45,9 +45,8 @@ export default function HomePage() {
       <p className="text-xs tracking-[0.22em] text-oxide uppercase">Atelier</p>
       <h1 className="font-serif mt-3 text-5xl leading-tight">Describe it. Approve the plan.</h1>
       <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted">
-        This phase stops at a task graph. A project manager agent turns your description into
-        questions, requirements a test can fail, an architecture, and tasks. Nothing is merged,
-        and no code is written, until you pass the gates.
+        A project manager turns the description into requirements and tasks. A developer writes
+        one task on a branch, QA checks it against the criteria, and you merge what passed.
       </p>
 
       <form onSubmit={onSubmit} className="mt-10 space-y-4 border border-line bg-white/60 p-6">
