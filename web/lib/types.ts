@@ -79,6 +79,14 @@ export type Snapshot = {
     observed: string;
     expected: string;
   }[];
+  checks: {
+    id: string;
+    task_id: string;
+    tier: string;
+    command: string;
+    exit_code: number;
+    excerpt: string;
+  }[];
   gates: { id: string; gate: string; decision: string; note: string | null; created_at: string }[];
   events: {
     id: string;
