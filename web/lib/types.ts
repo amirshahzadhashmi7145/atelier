@@ -30,6 +30,7 @@ export type Task = {
   depends_on: string[];
   retry_count: number;
   max_retries: number;
+  branch_name: string | null;
 };
 
 export type Snapshot = {

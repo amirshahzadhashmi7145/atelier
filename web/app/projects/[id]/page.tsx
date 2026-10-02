@@ -425,9 +425,19 @@ export default function ProjectPage() {
           <section className="border border-line bg-white/70 p-5">
             <h2 className="font-serif text-2xl">Tasks</h2>
             <p className="mt-1 text-sm text-muted">
-              A task with unfinished dependencies is blocked. Ready means an agent could pick it up. This phase
-              does not run the agents.
+              Ready means the orchestrator may claim it. The agent writes only inside its zone, on a branch.
+              Accepting the branch merges it and unblocks whatever was waiting.
             </p>
+            {can("run_ready") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
+                onClick={() => run(() => api(`/api/projects/${project.id}/tasks/run`, { method: "POST" }))}
+              >
+                Run the next ready task
+              </button>
+            ) : null}
             {can("generate_tasks") ? (
               <button
                 type="button"
@@ -446,19 +456,30 @@ export default function ProjectPage() {
             <ul className="mt-4 space-y-3">
               {snapshot.tasks.map((task) => (
                 <li key={task.id} className="flex gap-4 border-t border-line pt-3">
-                  <span
-                    className={`mt-1 h-2 w-2 shrink-0 rounded-full ${task.state === "ready" ? "bg-moss" : "bg-muted"}`}
-                  />
+                  <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${dotClass(task.state)}`} />
                   <div>
                     <p className="text-xs tracking-widest text-muted uppercase">
-                      {task.key} · {task.state} · {task.zone} · size {task.size}
+                      {task.key} · {task.state.replaceAll("_", " ")} · {task.zone} · size {task.size}
                     </p>
                     <h3 className="font-serif text-xl">{task.title}</h3>
                     <p className="text-sm">{task.description}</p>
                     <p className="mt-1 text-sm text-muted">
                       Covers {task.requirement_keys.join(", ")}
                       {task.depends_on.length ? ` · waits on ${task.depends_on.join(", ")}` : " · nothing blocks it"}
+                      {task.branch_name ? ` · ${task.branch_name}` : ""}
                     </p>
+                    {task.state === "in_review" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="mt-2 bg-moss px-3 py-2 text-sm text-white"
+                        onClick={() =>
+                          run(() => api(`/api/projects/${project.id}/tasks/${task.id}/accept`, { method: "POST" }))
+                        }
+                      >
+                        Accept and merge
+                      </button>
+                    ) : null}
                   </div>
                 </li>
               ))}
@@ -476,6 +497,8 @@ export default function ProjectPage() {
                 <span>
                   {event.type.replaceAll(".", " · ")}
                   <span className="text-muted"> · {event.actor_role ?? event.actor_kind}</span>
+                  {typeof event.payload.cause === "string" ? ` — ${event.payload.cause}` : null}
+                  {typeof event.payload.summary === "string" ? ` — ${event.payload.summary}` : null}
                 </span>
               </li>
             ))}
@@ -484,6 +507,12 @@ export default function ProjectPage() {
       </div>
     </main>
   );
+}
+
+function dotClass(state: string): string {
+  if (state === "ready" || state === "done") return "bg-moss";
+  if (state === "blocked") return "bg-muted";
+  return "bg-oxide";
 }
 
 function GateButtons({
