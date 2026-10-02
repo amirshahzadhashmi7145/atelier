@@ -19,6 +19,7 @@ class FakeLlm:
             "requirements": _requirements,
             "architecture": _architecture,
             "tasks": _tasks,
+            "implement": _implement,
         }[purpose]
         return LlmResult(
             data=builder(user),
@@ -145,6 +146,23 @@ def _subject(user: str) -> str:
     body = user.split(marker, 1)[1] if marker in user else user
     line = body.strip().split("\n", 1)[0].strip()
     return line[:140] or "the requested product"
+
+
+def _implement(user: str) -> dict:
+    if "Zone: frontend" in user:
+        path = "web/page.tsx"
+        content = "export default function Page() {\n  return <p>Ready</p>;\n}\n"
+    elif "Zone: ai_engineer" in user:
+        path = "server/ai/pipeline.py"
+        content = "def run() -> None:\n    return None\n"
+    else:
+        path = "server/app.py"
+        content = "def create_record() -> dict:\n    return {\"id\": \"1\"}\n"
+    return {
+        "summary": "Added the first file for this task.",
+        "done": True,
+        "writes": [{"path": path, "content": content}],
+    }
 
 
 def _tasks(user: str) -> dict:

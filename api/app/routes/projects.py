@@ -6,6 +6,7 @@ These handlers do not decide whether a step is legal. The service does.
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from app.services.execution import ExecutionService
 from app.schemas import (
     ClarificationSubmit,
     GateSubmit,
@@ -124,6 +125,32 @@ def generate_architecture(project_id: str, service: PlanningService = Depends(ge
 @router.post("/projects/{project_id}/tasks", response_model=ProjectSnapshot)
 def generate_tasks(project_id: str, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
     return service.generate_tasks(project_id)
+
+
+def get_executor(request: Request):
+    session: Session = request.app.state.session_factory()
+    try:
+        yield ExecutionService(session, request.app.state.llm, request.app.state.settings)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@router.post("/projects/{project_id}/tasks/run", response_model=ProjectSnapshot)
+def run_next_task(project_id: str, service: ExecutionService = Depends(get_executor)) -> ProjectSnapshot:
+    return service.run_next(project_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/accept", response_model=ProjectSnapshot)
+def accept_task(
+    project_id: str,
+    task_id: str,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.accept(project_id, task_id)
 
 
 @router.post("/projects/{project_id}/gates", response_model=ProjectSnapshot)

@@ -60,6 +60,13 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
+def _actions(stage: str, tasks: list) -> list[str]:
+    actions = next_actions(PlanStage(stage))
+    if any(task.state == "ready" for task in tasks):
+        return [*actions, "run_ready"]
+    return actions
+
+
 class _Question(BaseModel):
     question: str = Field(min_length=1)
     resolves: str = Field(min_length=1)
@@ -181,6 +188,7 @@ class PlanningService:
                     depends_on=[key_by_id[dep.depends_on_id] for dep in task.dependencies],
                     retry_count=task.retry_count,
                     max_retries=task.max_retries,
+                    branch_name=task.branch_name,
                 )
             )
         uncovered = uncovered_requirements(
@@ -204,7 +212,7 @@ class PlanningService:
                 architecture_summary=project.architecture_summary,
                 test_strategy=project.test_strategy,
                 created_at=project.created_at,
-                next_actions=next_actions(PlanStage(project.stage)),
+                next_actions=_actions(project.stage, tasks),
                 uncovered_requirement_keys=uncovered,
             ),
             clarifications=[
