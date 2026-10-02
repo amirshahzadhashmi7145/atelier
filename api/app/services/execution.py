@@ -9,18 +9,20 @@ because the failure is the record a person needs to see.
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.agents.developer import implement_prompt
+from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
+from app.domain.qa import Finding, judge
 from app.domain.schedule import ClaimCandidate, choose_next
 from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
-from app.models import AgentRun, Event, Project, Task
+from app.models import AgentRun, CriterionFinding, Defect, Event, Project, Task
 from app.schemas import ProjectSnapshot
 from app.services.planning import PlanningService, new_id
 from app.services.workspace import Workspace
@@ -35,6 +37,19 @@ class _Implement(BaseModel):
     summary: str = Field(min_length=1)
     done: bool = False
     writes: list[_Write] = []
+
+
+class _FindingIn(BaseModel):
+    criterion_key: str = Field(min_length=1)
+    result: str
+    note: str = ""
+    reproduction: str = ""
+    observed: str = ""
+    expected: str = ""
+
+
+class _ReviewIn(BaseModel):
+    findings: list[_FindingIn] = Field(min_length=1)
 
 
 class ExecutionService:
@@ -53,18 +68,123 @@ class ExecutionService:
             self._fail(project, task, exc.message)
         return self.planning.snapshot(project.id)
 
-    def accept(self, project_id: str, task_id: str) -> ProjectSnapshot:
+    def review(self, project_id: str, task_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
         task = self._task(project, task_id)
         if task.state != TaskState.IN_REVIEW.value:
-            raise DomainError("Only a task that is in review can be accepted.")
+            raise DomainError("Only a task that is in review can be checked.")
+        if not task.branch_name:
+            raise DomainError("This task has no branch to review.")
+        criteria = self._criteria(project, task)
+        try:
+            diff = Workspace(self._root(project)).diff(task.branch_name)
+        except RuntimeError as exc:
+            raise DomainError(f"The branch diff could not be read: {exc}") from exc
+        system, user = review_prompt(
+            task_key=task.key,
+            title=task.title,
+            criteria=criteria,
+            diff=diff,
+        )
+        result = self.llm.complete_json(purpose="qa", system=system, user=user)
+        self._record_run(
+            project,
+            task,
+            result.provider,
+            result.model,
+            result.input_tokens,
+            result.output_tokens,
+            role="qa",
+            purpose="qa",
+        )
+        parsed = self._parse_review(result.data)
+        findings = [
+            Finding(
+                criterion_key=item.criterion_key,
+                result=item.result,
+                note=item.note,
+                reproduction=item.reproduction,
+                observed=item.observed,
+                expected=item.expected,
+            )
+            for item in parsed.findings
+        ]
+        verdict = judge([key for key, _statement in criteria], findings)
+        self.session.execute(delete(CriterionFinding).where(CriterionFinding.task_id == task.id))
+        for item in findings:
+            self.session.add(
+                CriterionFinding(
+                    id=new_id("find"),
+                    project_id=project.id,
+                    task_id=task.id,
+                    criterion_key=item.criterion_key,
+                    result=item.result,
+                    note=item.note.strip(),
+                )
+            )
+        if verdict == "pass":
+            task.state, task.retry_count = self._move(task, TaskState.GATED)
+            self.planning._event(
+                project,
+                "qa.passed",
+                actor_kind="agent",
+                actor_role="qa",
+                task_id=task.id,
+                payload={"key": task.key, "summary": "Every criterion passed."},
+            )
+        elif verdict == "fail":
+            failed = [item for item in findings if item.result == "fail"]
+            for item in failed:
+                self.session.add(
+                    Defect(
+                        id=new_id("def"),
+                        project_id=project.id,
+                        task_id=task.id,
+                        criterion_key=item.criterion_key,
+                        reproduction=item.reproduction.strip(),
+                        observed=item.observed.strip(),
+                        expected=item.expected.strip(),
+                    )
+                )
+            task.state, task.retry_count = self._move(task, TaskState.CHANGES_REQUESTED)
+            task.state, task.retry_count = self._move(task, TaskState.READY)
+            self.planning._event(
+                project,
+                "qa.failed",
+                actor_kind="agent",
+                actor_role="qa",
+                task_id=task.id,
+                payload={
+                    "key": task.key,
+                    "summary": f"{len(failed)} criteria failed. The task is ready for another attempt.",
+                },
+            )
+        else:
+            flagged = [item.criterion_key for item in findings if item.result == "untestable"]
+            self.planning._event(
+                project,
+                "qa.untestable",
+                actor_kind="agent",
+                actor_role="qa",
+                task_id=task.id,
+                payload={
+                    "key": task.key,
+                    "summary": "Could not test " + ", ".join(flagged) + ".",
+                },
+            )
+        return self.planning.snapshot(project.id)
+
+    def accept(self, project_id: str, task_id: str) -> ProjectSnapshot:
+        project = self.planning._project(project_id)
+        task = self._task(project, task_id)
+        if task.state != TaskState.GATED.value:
+            raise DomainError("Only a task that passed review can be accepted.")
         if not task.branch_name:
             raise DomainError("This task has no branch to merge.")
         try:
             Workspace(self._root(project)).merge(task.branch_name, task.key)
         except RuntimeError as exc:
             raise DomainError(f"The branch could not be merged: {exc}") from exc
-        task.state, task.retry_count = self._move(task, TaskState.GATED)
         task.state, task.retry_count = self._move(task, TaskState.DONE)
         self.planning._event(
             project,
@@ -123,6 +243,7 @@ class ExecutionService:
         )
         previous: tuple | None = None
         summary = ""
+        rework = self._rework_text(task)
         while True:
             budget.charge(0)
             ownership = "\n".join(f"{glob} -> {zone}" for glob, zone in rules)
@@ -132,6 +253,7 @@ class ExecutionService:
                 title=task.title,
                 description=task.description,
                 ownership=ownership,
+                rework=rework,
             )
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
             self._record_run(project, task, result.provider, result.model, result.input_tokens, result.output_tokens)
@@ -212,12 +334,16 @@ class ExecutionService:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        *,
+        role: str | None = None,
+        purpose: str = "implement",
     ) -> None:
+        actor = role or task.zone
         run = AgentRun(
             id=new_id("run"),
             project_id=project.id,
-            role=task.zone,
-            purpose="implement",
+            role=actor,
+            purpose=purpose,
             status="succeeded",
             provider=provider,
             model=model,
@@ -230,16 +356,45 @@ class ExecutionService:
             Event(
                 id=new_id("evt"),
                 project_id=project.id,
-                type="agent.implement",
+                type=f"agent.{purpose}",
                 task_id=task.id,
                 actor_kind="agent",
-                actor_role=task.zone,
+                actor_role=actor,
                 run_id=run.id,
                 payload={"provider": provider, "model": model},
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
         )
+
+    def _criteria(self, project: Project, task: Task) -> list[tuple[str, str]]:
+        wanted = set(task.requirement_keys)
+        rows: list[tuple[str, str]] = []
+        for requirement in sorted(project.requirements, key=lambda item: item.sort_order):
+            if requirement.key not in wanted:
+                continue
+            for criterion in requirement.criteria:
+                rows.append((f"{requirement.key}/{criterion.key}", criterion.statement))
+        if not rows:
+            raise DomainError("This task has no acceptance criteria to review.")
+        return rows
+
+    def _rework_text(self, task: Task) -> str:
+        rows = self.session.scalars(select(Defect).where(Defect.task_id == task.id)).all()
+        return "\n".join(
+            f"{item.criterion_key}: expected {item.expected}; observed {item.observed}. Reproduce: {item.reproduction}"
+            for item in rows
+        )
+
+    def _parse_review(self, data: dict) -> _ReviewIn:
+        try:
+            return _ReviewIn.model_validate(data)
+        except ValidationError as exc:
+            loc = ".".join(str(part) for part in exc.errors()[0]["loc"])
+            raise DomainError(
+                f"The model reply failed validation at '{loc}'. Nothing was recorded.",
+                status_code=502,
+            ) from exc
 
     def _note_tokens(self, budget: RunBudget, tokens: int) -> None:
         budget.tokens += tokens

@@ -42,6 +42,8 @@ class Project(Base):
     decisions: Mapped[list["ArchitectureDecision"]] = relationship(cascade="all, delete-orphan")
     ownership: Mapped[list["OwnershipRule"]] = relationship(cascade="all, delete-orphan")
     tasks: Mapped[list["Task"]] = relationship(cascade="all, delete-orphan")
+    findings: Mapped[list["CriterionFinding"]] = relationship(cascade="all, delete-orphan")
+    defects: Mapped[list["Defect"]] = relationship(cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(cascade="all, delete-orphan")
     gates: Mapped[list["GateDecision"]] = relationship(cascade="all, delete-orphan")
     runs: Mapped[list["AgentRun"]] = relationship(cascade="all, delete-orphan")
@@ -147,6 +149,29 @@ class TaskDependency(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
     depends_on_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+
+
+class CriterionFinding(Base):
+    __tablename__ = "criterion_findings"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    criterion_key: Mapped[str] = mapped_column(String(40))
+    result: Mapped[str] = mapped_column(String(20))
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class Defect(Base):
+    __tablename__ = "defects"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    criterion_key: Mapped[str] = mapped_column(String(40))
+    reproduction: Mapped[str] = mapped_column(Text)
+    observed: Mapped[str] = mapped_column(Text)
+    expected: Mapped[str] = mapped_column(Text)
 
 
 class AgentRun(Base):

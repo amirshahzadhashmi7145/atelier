@@ -42,7 +42,9 @@ from app.schemas import (
     ClarificationOut,
     CriterionOut,
     DecisionOut,
+    DefectOut,
     EventOut,
+    FindingOut,
     GateOut,
     OwnershipOut,
     ProjectListItem,
@@ -259,6 +261,27 @@ class PlanningService:
                 OwnershipOut(id=item.id, glob=item.glob, zone=item.zone) for item in project.ownership
             ],
             tasks=task_out,
+            findings=[
+                FindingOut(
+                    id=item.id,
+                    task_id=item.task_id,
+                    criterion_key=item.criterion_key,
+                    result=item.result,
+                    note=item.note,
+                )
+                for item in sorted(project.findings, key=lambda item: item.criterion_key)
+            ],
+            defects=[
+                DefectOut(
+                    id=item.id,
+                    task_id=item.task_id,
+                    criterion_key=item.criterion_key,
+                    reproduction=item.reproduction,
+                    observed=item.observed,
+                    expected=item.expected,
+                )
+                for item in project.defects
+            ],
             gates=[
                 GateOut(
                     id=item.id,

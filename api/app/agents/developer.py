@@ -7,7 +7,15 @@ the directory the orchestrator will allow the reply to touch.
 from app.agents.pm import JSON_RULES
 
 
-def implement_prompt(*, zone: str, task_key: str, title: str, description: str, ownership: str) -> tuple[str, str]:
+def implement_prompt(
+    *,
+    zone: str,
+    task_key: str,
+    title: str,
+    description: str,
+    ownership: str,
+    rework: str = "",
+) -> tuple[str, str]:
     system = (
         "You are the "
         + zone.replace("_", " ")
@@ -23,4 +31,6 @@ def implement_prompt(*, zone: str, task_key: str, title: str, description: str, 
         f"{description}\n\n"
         f"Ownership:\n{ownership}"
     )
+    if rework.strip():
+        user += "\n\nPrevious review failed:\n" + rework.strip()
     return system, user

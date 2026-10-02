@@ -20,6 +20,7 @@ class FakeLlm:
             "architecture": _architecture,
             "tasks": _tasks,
             "implement": _implement,
+            "qa": _qa,
         }[purpose]
         return LlmResult(
             data=builder(user),
@@ -158,10 +159,38 @@ def _implement(user: str) -> dict:
     else:
         path = "server/app.py"
         content = "def create_record() -> dict:\n    return {\"id\": \"1\"}\n"
+    if "Previous review failed" in user:
+        content += "# revised after review\n"
     return {
         "summary": "Added the first file for this task.",
         "done": True,
         "writes": [{"path": path, "content": content}],
+    }
+
+
+def _qa(user: str) -> dict:
+    keys: list[str] = []
+    reading = False
+    for line in user.splitlines():
+        if line == "Criteria:":
+            reading = True
+            continue
+        if line == "Diff:":
+            break
+        if reading and line.startswith("- "):
+            keys.append(line[2:].split(":", 1)[0].strip())
+    return {
+        "findings": [
+            {
+                "criterion_key": key,
+                "result": "pass",
+                "note": "The change matches this criterion.",
+                "reproduction": "",
+                "observed": "",
+                "expected": "",
+            }
+            for key in keys
+        ]
     }
 
 

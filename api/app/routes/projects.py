@@ -144,6 +144,15 @@ def run_next_task(project_id: str, service: ExecutionService = Depends(get_execu
     return service.run_next(project_id)
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/review", response_model=ProjectSnapshot)
+def review_task(
+    project_id: str,
+    task_id: str,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.review(project_id, task_id)
+
+
 @router.post("/projects/{project_id}/tasks/{task_id}/accept", response_model=ProjectSnapshot)
 def accept_task(
     project_id: str,

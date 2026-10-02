@@ -107,6 +107,23 @@ class TaskOut(BaseModel):
     branch_name: str | None = None
 
 
+class FindingOut(BaseModel):
+    id: str
+    task_id: str
+    criterion_key: str
+    result: str
+    note: str
+
+
+class DefectOut(BaseModel):
+    id: str
+    task_id: str
+    criterion_key: str
+    reproduction: str
+    observed: str
+    expected: str
+
+
 class GateOut(BaseModel):
     id: str
     gate: str
@@ -162,6 +179,8 @@ class ProjectSnapshot(BaseModel):
     decisions: list[DecisionOut]
     ownership: list[OwnershipOut]
     tasks: list[TaskOut]
+    findings: list[FindingOut]
+    defects: list[DefectOut]
     gates: list[GateOut]
     events: list[EventOut]
     runs: list[RunOut]
