@@ -1,4 +1,4 @@
-from app.domain.qa import Finding, judge
+from app.domain.qa import Finding, decide_untestable, judge, needs_human
 from app.errors import DomainError
 
 
@@ -57,3 +57,36 @@ def test_a_failure_without_a_reproduction_is_rejected():
         assert "reproduction" in exc.message
     else:
         raise AssertionError("expected a rejection")
+
+
+def test_untestable_findings_need_a_person():
+    findings = [
+        _finding("FR-001/AC-1", "pass"),
+        _finding("FR-001/AC-2", "untestable", note="No clock in this run."),
+    ]
+    assert needs_human(findings)
+    assert decide_untestable(findings, "waive") == "waive"
+    assert decide_untestable(findings, "reject") == "reject"
+
+
+def test_a_clean_pass_does_not_ask_a_person():
+    assert not needs_human([_finding("FR-001/AC-1", "pass")])
+    try:
+        decide_untestable([_finding("FR-001/AC-1", "pass")], "waive")
+    except DomainError as exc:
+        assert exc.status_code == 409
+    else:
+        raise AssertionError("expected a rejection")
+
+
+def test_a_failure_does_not_ask_a_person():
+    findings = [
+        _finding(
+            "FR-001/AC-1",
+            "fail",
+            reproduction="open /",
+            observed="500",
+            expected="200",
+        )
+    ]
+    assert not needs_human(findings)
