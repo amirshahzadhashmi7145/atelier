@@ -196,6 +196,56 @@ def test_an_untestable_criterion_stays_in_review(tmp_path: Path):
     assert accepted.status_code == 409
 
 
+def test_a_person_can_waive_untestable_criteria(tmp_path: Path):
+    client = client_for(tmp_path, _Untestable())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    waived = client.post(
+        f"/api/projects/{project_id}/tasks/{task_id}/untestable",
+        json={"decision": "waive"},
+    )
+    assert waived.status_code == 200, waived.text
+    body = waived.json()
+    assert _by_key(body, "TASK-001")["state"] == "gated"
+    task_findings = [item for item in body["findings"] if item["task_id"] == task_id]
+    assert any(item["result"] == "waived" for item in task_findings)
+    assert all(item["result"] in {"waived", "pass"} for item in task_findings)
+    assert any(event["type"] == "qa.waived" for event in body["events"])
+
+
+def test_a_person_can_reject_untestable_criteria(tmp_path: Path):
+    client = client_for(tmp_path, _Untestable())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    rejected = client.post(
+        f"/api/projects/{project_id}/tasks/{task_id}/untestable",
+        json={"decision": "reject"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    body = rejected.json()
+    assert _by_key(body, "TASK-001")["state"] == "ready"
+    assert any(defect["task_id"] == task_id for defect in body["defects"])
+    assert any(event["type"] == "qa.rejected_untestable" for event in body["events"])
+
+
+def test_waive_is_refused_when_review_passed(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert _by_key(reviewed.json(), "TASK-001")["state"] == "gated"
+    refused = client.post(
+        f"/api/projects/{project_id}/tasks/{task_id}/untestable",
+        json={"decision": "waive"},
+    )
+    assert refused.status_code == 409
+
+
 def test_a_review_that_skips_a_criterion_records_nothing(tmp_path: Path):
     client = client_for(tmp_path, _DropsACriterion())
     project_id = _prepare(client)
