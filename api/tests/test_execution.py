@@ -14,6 +14,7 @@ def client_for(tmp_path: Path, llm=None, **overrides) -> TestClient:
         database_url="sqlite:///:memory:",
         llm_provider="fake",
         workspaces_dir=str(tmp_path),
+        check_sandbox=False,
         **overrides,
     )
     return TestClient(create_app(settings=settings, llm=llm or FakeLlm()))

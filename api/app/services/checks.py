@@ -3,6 +3,10 @@
 The command is taken from the approved plan and executed in the project
 directory. It is one program plus arguments. Shell syntax is rejected
 so a plan cannot smuggle a second command into the same string.
+
+When a sandbox is configured, the program runs inside a container with
+no network and a read-only mount of the project. Otherwise it runs on
+the host, which is only for tests that intentionally skip the container.
 """
 
 import shlex
@@ -11,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.errors import DomainError
+from app.services.sandbox import run_in_sandbox
 
 TIERS = ("unit", "integration", "ui")
 _OPERATORS = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<"}
@@ -22,6 +27,14 @@ class CheckResult:
     command: str
     exit_code: int
     excerpt: str
+
+
+@dataclass(frozen=True)
+class SandboxOptions:
+    image: str
+    memory: str = "256m"
+    cpus: str = "1"
+    pids_limit: int = 64
 
 
 def parse_command(command: str) -> list[str]:
@@ -45,7 +58,13 @@ def parse_command(command: str) -> list[str]:
     return parts
 
 
-def run_checks(root: Path, strategy: dict | None, timeout: int) -> list[CheckResult]:
+def run_checks(
+    root: Path,
+    strategy: dict | None,
+    timeout: int,
+    *,
+    sandbox: SandboxOptions | None = None,
+) -> list[CheckResult]:
     if not strategy:
         raise DomainError("This project has no test commands.", status_code=422)
     planned: list[tuple[str, str]] = []
@@ -55,11 +74,28 @@ def run_checks(root: Path, strategy: dict | None, timeout: int) -> list[CheckRes
             raise DomainError(f"The {tier} test command is missing.", status_code=422)
         parse_command(command)
         planned.append((tier, command))
-    return [_run(root, tier, command, timeout) for tier, command in planned]
+    return [_run(root, tier, command, timeout, sandbox) for tier, command in planned]
 
 
-def _run(root: Path, tier: str, command: str, timeout: int) -> CheckResult:
+def _run(
+    root: Path,
+    tier: str,
+    command: str,
+    timeout: int,
+    sandbox: SandboxOptions | None,
+) -> CheckResult:
     argv = parse_command(command)
+    if sandbox is not None:
+        exit_code, excerpt = run_in_sandbox(
+            root,
+            argv,
+            image=sandbox.image,
+            timeout=timeout,
+            memory=sandbox.memory,
+            cpus=sandbox.cpus,
+            pids_limit=sandbox.pids_limit,
+        )
+        return CheckResult(tier, command, exit_code, excerpt)
     try:
         completed = subprocess.run(
             argv,

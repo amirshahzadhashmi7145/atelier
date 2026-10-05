@@ -23,7 +23,7 @@ from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
 from app.models import AgentRun, CheckRun, CriterionFinding, Defect, Event, Project, Task
-from app.services.checks import CheckResult, run_checks
+from app.services.checks import CheckResult, SandboxOptions, run_checks
 from app.schemas import ProjectSnapshot
 from app.services.planning import PlanningService, new_id
 from app.services.workspace import Workspace
@@ -83,7 +83,20 @@ class ExecutionService:
             workspace.start_branch(task.branch_name)
         except RuntimeError as exc:
             raise DomainError(f"The branch diff could not be read: {exc}") from exc
-        checks = run_checks(workspace.root, project.test_strategy, self.settings.check_timeout_seconds)
+        sandbox = None
+        if self.settings.check_sandbox:
+            sandbox = SandboxOptions(
+                image=self.settings.sandbox_image,
+                memory=self.settings.sandbox_memory,
+                cpus=self.settings.sandbox_cpus,
+                pids_limit=self.settings.sandbox_pids_limit,
+            )
+        checks = run_checks(
+            workspace.root,
+            project.test_strategy,
+            self.settings.check_timeout_seconds,
+            sandbox=sandbox,
+        )
         self._replace_checks(project, task, checks)
         failed_checks = [item for item in checks if item.exit_code != 0]
         if failed_checks:
