@@ -270,15 +270,13 @@ def test_qa_cannot_change_the_branch(tmp_path: Path):
     assert (tmp_path / project_id / "server" / "app.py").read_text() == before
 
 
-def test_a_failing_test_command_blocks_a_pass(tmp_path: Path):
+def test_a_failing_test_command_blocks_a_commit(tmp_path: Path):
     llm = _BrokenUnitTests()
     client = client_for(tmp_path, llm)
     project_id = _prepare(client)
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
-    task_id = _by_key(ran.json(), "TASK-001")["id"]
-    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
-    assert reviewed.status_code == 200, reviewed.text
-    body = reviewed.json()
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
     assert _by_key(body, "TASK-001")["state"] == "ready"
     assert llm.qa_calls == 0
     unit = next(item for item in body["checks"] if item["tier"] == "unit")
@@ -286,8 +284,10 @@ def test_a_failing_test_command_blocks_a_pass(tmp_path: Path):
     defect = next(item for item in body["defects"] if item["criterion_key"] == "tests/unit")
     assert defect["reproduction"].startswith("python3")
     assert "The command exits 0." == defect["expected"]
+    assert "before a commit" in _failure(body)
+    assert not (tmp_path / project_id / "server" / "app.py").exists()
     log = subprocess.run(
-        ["git", "log", "main", "--oneline"],
+        ["git", "log", "--all", "--oneline"],
         cwd=tmp_path / project_id,
         check=True,
         capture_output=True,
@@ -300,13 +300,13 @@ def test_a_chained_test_command_does_not_run(tmp_path: Path):
     client = client_for(tmp_path, _ChainedTest())
     project_id = _prepare(client)
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
-    task_id = _by_key(ran.json(), "TASK-001")["id"]
-    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
-    assert reviewed.status_code == 422
-    body = client.get(f"/api/projects/{project_id}").json()
-    assert _by_key(body, "TASK-001")["state"] == "in_review"
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    assert _by_key(body, "TASK-001")["state"] == "ready"
     assert body["checks"] == []
     assert not (tmp_path / project_id / "chained.txt").exists()
+    assert "single program" in _failure(body)
+    assert not (tmp_path / project_id / "server" / "app.py").exists()
 
 
 def test_the_review_prompt_states_criteria_before_the_diff():

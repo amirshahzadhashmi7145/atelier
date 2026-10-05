@@ -2,8 +2,8 @@
 
 The model proposes file contents. This module decides whether those
 paths are legal, whether the run still has budget, and whether the
-branch may be merged. A failed run is saved. It is not rolled back,
-because the failure is the record a person needs to see.
+declared tests pass before a commit. A failed run is saved. Uncommitted
+writes are discarded so the branch stays clean.
 """
 
 from pathlib import Path
@@ -83,14 +83,7 @@ class ExecutionService:
             workspace.start_branch(task.branch_name)
         except RuntimeError as exc:
             raise DomainError(f"The branch diff could not be read: {exc}") from exc
-        sandbox = None
-        if self.settings.check_sandbox:
-            sandbox = SandboxOptions(
-                image=self.settings.sandbox_image,
-                memory=self.settings.sandbox_memory,
-                cpus=self.settings.sandbox_cpus,
-                pids_limit=self.settings.sandbox_pids_limit,
-            )
+        sandbox = self._sandbox()
         checks = run_checks(
             workspace.root,
             project.test_strategy,
@@ -359,8 +352,49 @@ class ExecutionService:
             if not parsed.writes:
                 raise DomainError("The agent finished without writing a file.", status_code=422)
             summary = parsed.summary.strip()
+            writes = [(item.path, item.content) for item in parsed.writes]
             try:
-                workspace.commit(task.key, summary, [(item.path, item.content) for item in parsed.writes])
+                workspace.apply(writes)
+            except RuntimeError as exc:
+                raise DomainError(f"The branch could not be written: {exc}") from exc
+            try:
+                checks = run_checks(
+                    workspace.root,
+                    project.test_strategy,
+                    self.settings.check_timeout_seconds,
+                    sandbox=self._sandbox(),
+                )
+            except DomainError:
+                try:
+                    workspace.discard()
+                except RuntimeError as exc:
+                    raise DomainError(f"The failed change could not be discarded: {exc}") from exc
+                raise
+            self._replace_checks(project, task, checks)
+            failed_checks = [item for item in checks if item.exit_code != 0]
+            if failed_checks:
+                try:
+                    workspace.discard()
+                except RuntimeError as exc:
+                    raise DomainError(f"The failed change could not be discarded: {exc}") from exc
+                for item in failed_checks:
+                    self.session.add(
+                        Defect(
+                            id=new_id("def"),
+                            project_id=project.id,
+                            task_id=task.id,
+                            criterion_key=f"tests/{item.tier}",
+                            reproduction=item.command,
+                            observed=item.excerpt or f"The command exited {item.exit_code}.",
+                            expected="The command exits 0.",
+                        )
+                    )
+                raise DomainError(
+                    "; ".join(f"{item.tier} exited {item.exit_code}" for item in failed_checks)
+                    + ". Declared tests must pass before a commit."
+                )
+            try:
+                workspace.commit_staged(task.key, summary)
             except RuntimeError as exc:
                 raise DomainError(f"The branch could not be committed: {exc}") from exc
             break
@@ -372,6 +406,16 @@ class ExecutionService:
             actor_role=task.zone,
             task_id=task.id,
             payload={"key": task.key, "branch": branch, "summary": summary},
+        )
+
+    def _sandbox(self) -> SandboxOptions | None:
+        if not self.settings.check_sandbox:
+            return None
+        return SandboxOptions(
+            image=self.settings.sandbox_image,
+            memory=self.settings.sandbox_memory,
+            cpus=self.settings.sandbox_cpus,
+            pids_limit=self.settings.sandbox_pids_limit,
         )
 
     def _fail(self, project: Project, task: Task, cause: str) -> None:
