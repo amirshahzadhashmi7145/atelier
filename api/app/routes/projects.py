@@ -15,6 +15,7 @@ from app.schemas import (
     ProjectListItem,
     ProjectSnapshot,
     RequirementWrite,
+    UntestableSubmit,
 )
 from app.services.planning import PlanningService
 
@@ -160,6 +161,16 @@ def accept_task(
     service: ExecutionService = Depends(get_executor),
 ) -> ProjectSnapshot:
     return service.accept(project_id, task_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/untestable", response_model=ProjectSnapshot)
+def resolve_untestable(
+    project_id: str,
+    task_id: str,
+    body: UntestableSubmit,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.resolve_untestable(project_id, task_id, body.decision)
 
 
 @router.post("/projects/{project_id}/gates", response_model=ProjectSnapshot)

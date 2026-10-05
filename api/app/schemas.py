@@ -43,6 +43,10 @@ class GateSubmit(BaseModel):
     note: str | None = None
 
 
+class UntestableSubmit(BaseModel):
+    decision: Literal["waive", "reject"]
+
+
 class CriterionOut(BaseModel):
     id: str
     key: str

@@ -16,7 +16,7 @@ from app.agents.developer import implement_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
-from app.domain.qa import Finding, judge
+from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.schedule import ClaimCandidate, choose_next
 from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
@@ -212,6 +212,66 @@ class ExecutionService:
         self._unblock(project)
         return self.planning.snapshot(project.id)
 
+    def resolve_untestable(self, project_id: str, task_id: str, decision: str) -> ProjectSnapshot:
+        """A person settles criteria the review could not execute."""
+
+        project = self.planning._project(project_id)
+        task = self._task(project, task_id)
+        if task.state != TaskState.IN_REVIEW.value:
+            raise DomainError("Only a task that is in review can be decided.")
+        stored = [
+            item
+            for item in project.findings
+            if item.task_id == task.id
+        ]
+        findings = [
+            Finding(
+                criterion_key=item.criterion_key,
+                result=item.result,
+                note=item.note,
+            )
+            for item in stored
+        ]
+        choice = decide_untestable(findings, decision)
+        flagged = [item for item in stored if item.result == "untestable"]
+        if choice == "waive":
+            for item in flagged:
+                item.result = "waived"
+            task.state, task.retry_count = self._move(task, TaskState.GATED)
+            self.planning._event(
+                project,
+                "qa.waived",
+                actor_kind="user",
+                task_id=task.id,
+                payload={
+                    "key": task.key,
+                    "summary": "Accepted without testing "
+                    + ", ".join(item.criterion_key for item in flagged)
+                    + ".",
+                },
+            )
+            return self.planning.snapshot(project.id)
+        self._send_back(
+            project,
+            task,
+            [
+                (
+                    item.criterion_key,
+                    item.note.strip() or "The criterion could not be tested.",
+                    "Not exercised in this review.",
+                    "A person could verify the criterion, or the next attempt makes it testable.",
+                )
+                for item in flagged
+            ],
+            "A person rejected "
+            + ", ".join(item.criterion_key for item in flagged)
+            + ". The task is ready for another attempt.",
+            event_type="qa.rejected_untestable",
+            actor_kind="user",
+            actor_role=None,
+        )
+        return self.planning.snapshot(project.id)
+
     def _claim(self, project: Project) -> Task:
         chosen = choose_next(
             [
@@ -398,7 +458,17 @@ class ExecutionService:
                 )
             )
 
-    def _send_back(self, project: Project, task: Task, rows: list[tuple[str, str, str, str]], summary: str) -> None:
+    def _send_back(
+        self,
+        project: Project,
+        task: Task,
+        rows: list[tuple[str, str, str, str]],
+        summary: str,
+        *,
+        event_type: str = "qa.failed",
+        actor_kind: str = "agent",
+        actor_role: str | None = "qa",
+    ) -> None:
         for criterion_key, reproduction, observed, expected in rows:
             self.session.add(
                 Defect(
@@ -415,9 +485,9 @@ class ExecutionService:
         task.state, task.retry_count = self._move(task, TaskState.READY)
         self.planning._event(
             project,
-            "qa.failed",
-            actor_kind="agent",
-            actor_role="qa",
+            event_type,
+            actor_kind=actor_kind,
+            actor_role=actor_role,
             task_id=task.id,
             payload={"key": task.key, "summary": summary},
         )

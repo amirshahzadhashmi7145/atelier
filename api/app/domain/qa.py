@@ -65,3 +65,37 @@ def judge(expected_keys: list[str], findings: list[Finding]) -> str:
     if any(item.result == "untestable" for item in findings):
         return "untestable"
     return "pass"
+
+
+def needs_human(findings: list[Finding]) -> bool:
+    """True when review left criteria that only a person can settle.
+
+    Failures already have a path back to the developer. Untestable
+    criteria do not, until someone decides to waive or reject them.
+    """
+
+    if not findings:
+        return False
+    if any(item.result == "fail" for item in findings):
+        return False
+    return any(item.result == "untestable" for item in findings)
+
+
+def decide_untestable(findings: list[Finding], decision: str) -> str:
+    """Return waive or reject after a person has looked at the findings.
+
+    waive: the untestable criteria are accepted as met.
+    reject: those criteria become work for another attempt.
+    """
+
+    if decision not in {"waive", "reject"}:
+        raise DomainError(
+            f"'{decision}' is not a decision a person can make here.",
+            status_code=422,
+        )
+    if not needs_human(findings):
+        raise DomainError(
+            "There is nothing untestable for a person to decide.",
+            status_code=409,
+        )
+    return decision
