@@ -431,10 +431,10 @@ export default function ProjectPage() {
             <h2 className="font-serif text-2xl">Tasks</h2>
             <p className="mt-1 text-sm text-muted">
               Ready means the orchestrator may claim it. The agent writes only inside its zone, on a branch.
-              Review runs the architecture&apos;s test commands on that branch, then checks the acceptance
-              criteria. A failing command sends the task back. A criterion the review cannot execute waits
-              for you to waive it or send the task back. Accepting a passed review merges it and unblocks
-              whatever was waiting.
+              Review runs the architecture&apos;s test commands in a container on that branch, then checks
+              the acceptance criteria. A failing command sends the task back. A criterion the review cannot
+              execute waits for you to waive it or send the task back. Accepting a passed review merges it
+              and unblocks whatever was waiting.
             </p>
             {can("run_ready") ? (
               <button
