@@ -26,6 +26,15 @@ const RAIL = [
   { label: "Tasks", hint: "Work, and what it waits on", match: (stage: string) => stage === "tasks_ready" },
 ];
 
+const GATE_LABELS: { key: string; label: string }[] = [
+  { key: "requirements", label: "Requirements" },
+  { key: "architecture", label: "Architecture" },
+  { key: "merge", label: "Merge" },
+  { key: "deployment", label: "Deployment" },
+  { key: "external_side_effects", label: "External effects" },
+  { key: "spend_increase", label: "Spend increase" },
+];
+
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -82,6 +91,7 @@ export default function ProjectPage() {
   const spendByTask = project.spend_by_task ?? [];
   const estimateTokens = project.estimate_tokens ?? 0;
   const spendOverEstimate = Boolean(project.spend_over_estimate);
+  const gatePolicy = project.gate_policy ?? {};
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
@@ -215,6 +225,38 @@ export default function ProjectPage() {
           </p>
         ) : null}
         {error ? <p className="text-sm text-oxide">{error}</p> : null}
+
+        <section className="border border-line bg-white/70 p-5">
+          <h2 className="font-serif text-2xl">Approval policy</h2>
+          <p className="mt-1 text-sm text-muted">
+            Each gate is human or automatic. Merge and deployment stay human unless you change them.
+          </p>
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+            {GATE_LABELS.map((gate) => (
+              <li key={gate.key} className="flex items-center justify-between gap-3 text-sm">
+                <span>{gate.label}</span>
+                <select
+                  disabled={busy || project.paused}
+                  value={gatePolicy[gate.key] ?? "human"}
+                  className="border border-line bg-paper px-2 py-1"
+                  onChange={(event) =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/gate-policy`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                          gate_policy: { ...gatePolicy, [gate.key]: event.target.value },
+                        }),
+                      }),
+                    )
+                  }
+                >
+                  <option value="human">Human</option>
+                  <option value="automatic">Automatic</option>
+                </select>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         <section className="border border-line bg-white/70 p-5">
           <h2 className="font-serif text-2xl">Interpretation</h2>

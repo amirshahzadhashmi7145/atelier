@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.agents import pm
 from app.config import Settings
 from app.domain.control import require_active
+from app.domain.gates import DEFAULT_GATE_POLICY, is_automatic, normalize_gate_policy
 from app.domain.graph import require_acyclic
 from app.domain.plan_stage import PlanStage, next_actions, transition
 from app.domain.spend import (
@@ -187,6 +188,7 @@ class PlanningService:
             tech_preferences=(tech_preferences or "").strip() or None,
             github_repo=repo,
             spend_ceiling_tokens=spend_ceiling_tokens,
+            gate_policy=dict(DEFAULT_GATE_POLICY),
             stage=PlanStage.INTAKE.value,
         )
         self.session.add(project)
@@ -221,6 +223,24 @@ class PlanningService:
             payload={"summary": "A person unpaused the project."},
         )
         return self.snapshot(project_id)
+
+    def set_gate_policy(self, project_id: str, gate_policy: dict[str, str]) -> ProjectSnapshot:
+        project = self._project(project_id)
+        require_active(paused=bool(project.paused))
+        project.gate_policy = normalize_gate_policy(gate_policy)
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.gate_policy",
+            actor_kind="user",
+            payload={
+                "gate_policy": project.gate_policy,
+                "summary": "Approval policy updated.",
+            },
+        )
+        self._maybe_auto_approve(project, "requirements")
+        self._maybe_auto_approve(project, "architecture")
+        return self.snapshot(project.id)
 
     def set_spend_ceiling(self, project_id: str, spend_ceiling_tokens: int) -> ProjectSnapshot:
         project = self._project(project_id)
@@ -326,6 +346,7 @@ class PlanningService:
                     estimate=estimate,
                     margin=self.settings.spend_estimate_margin,
                 ),
+                gate_policy=normalize_gate_policy(project.gate_policy),
                 created_at=project.created_at,
                 next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
                 uncovered_requirement_keys=uncovered,
@@ -613,6 +634,9 @@ class PlanningService:
         else:
             project.updated_at = utcnow()
             self._event(project, "requirements.rewritten", actor_kind="agent", actor_role="pm", payload={})
+        self.session.flush()
+        self.session.expire(project, ["requirements"])
+        self._maybe_auto_approve(project, "requirements")
         return self.snapshot(project.id)
 
     def add_requirement(self, project_id: str, body: RequirementWrite) -> ProjectSnapshot:
@@ -703,6 +727,9 @@ class PlanningService:
         else:
             project.updated_at = utcnow()
             self._event(project, "architecture.rewritten", actor_kind="agent", actor_role="pm", payload={})
+        self.session.flush()
+        self.session.expire(project, ["ownership", "architecture_summary", "test_strategy"])
+        self._maybe_auto_approve(project, "architecture")
         return self.snapshot(project.id)
 
     def generate_tasks(self, project_id: str) -> ProjectSnapshot:
@@ -782,8 +809,51 @@ class PlanningService:
         self._move(project, PlanStage.TASKS_READY)
         return self.snapshot(project.id)
 
-    def decide_gate(self, project_id: str, *, gate: str, decision: str, note: str | None) -> ProjectSnapshot:
+    def decide_gate(
+        self,
+        project_id: str,
+        *,
+        gate: str,
+        decision: str,
+        note: str | None,
+        actor_kind: str = "user",
+    ) -> ProjectSnapshot:
         project = self._project(project_id)
+        self._apply_gate_decision(
+            project,
+            gate=gate,
+            decision=decision,
+            note=note,
+            actor_kind=actor_kind,
+        )
+        return self.snapshot(project.id)
+
+    def _maybe_auto_approve(self, project: Project, gate: str) -> None:
+        if not is_automatic(project.gate_policy, gate):
+            return
+        if gate == "requirements" and project.stage != PlanStage.REQUIREMENTS_DRAFT.value:
+            return
+        if gate == "architecture" and project.stage != PlanStage.ARCHITECTURE_DRAFT.value:
+            return
+        if gate not in {"requirements", "architecture"}:
+            return
+        self._apply_gate_decision(
+            project,
+            gate=gate,
+            decision="approved",
+            note="Approved by automatic policy.",
+            actor_kind="system",
+        )
+
+    def _apply_gate_decision(
+        self,
+        project: Project,
+        *,
+        gate: str,
+        decision: str,
+        note: str | None,
+        actor_kind: str,
+    ) -> None:
         if gate == "requirements":
             self._require_stage(project, {PlanStage.REQUIREMENTS_DRAFT})
             if decision == "approved":
@@ -803,20 +873,21 @@ class PlanningService:
         else:
             raise DomainError("Unknown gate.", status_code=422)
 
+        cleaned = (note or "").strip() or None
         self.session.add(
             GateDecision(
                 id=new_id("gate"),
                 project_id=project.id,
                 gate=gate,
                 decision=decision,
-                note=(note or "").strip() or None,
+                note=cleaned,
             )
         )
         self._event(
             project,
             "gate.decided",
-            actor_kind="user",
-            payload={"gate": gate, "decision": decision, "note": note},
+            actor_kind=actor_kind,
+            payload={"gate": gate, "decision": decision, "note": cleaned, "mode": actor_kind},
         )
         if decision == "approved" and gate == "requirements":
             self._move(project, PlanStage.REQUIREMENTS_APPROVED)
@@ -824,7 +895,6 @@ class PlanningService:
             self._move(project, PlanStage.ARCHITECTURE_APPROVED)
         else:
             project.updated_at = utcnow()
-        return self.snapshot(project.id)
 
     def _guard_spend(self, project: Project) -> None:
         spent = tokens_used(project.runs)

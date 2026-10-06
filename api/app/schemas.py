@@ -22,6 +22,10 @@ class SpendCeilingUpdate(BaseModel):
     spend_ceiling_tokens: int = Field(ge=1)
 
 
+class GatePolicyUpdate(BaseModel):
+    gate_policy: dict[str, Literal["human", "automatic"]]
+
+
 class InterpretationUpdate(BaseModel):
     interpretation: str = Field(min_length=1)
 
@@ -217,6 +221,7 @@ class ProjectOut(BaseModel):
     spend_by_task: list[SpendByTaskOut] = []
     estimate_tokens: int = 0
     spend_over_estimate: bool = False
+    gate_policy: dict[str, str] = {}
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]

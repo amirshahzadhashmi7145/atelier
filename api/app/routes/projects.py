@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.services.execution import ExecutionService
 from app.schemas import (
     ClarificationSubmit,
+    GatePolicyUpdate,
     GateSubmit,
     InterpretationUpdate,
     ProjectCreate,
@@ -85,6 +86,15 @@ def set_spend_ceiling(
     service: PlanningService = Depends(get_service),
 ) -> ProjectSnapshot:
     return service.set_spend_ceiling(project_id, body.spend_ceiling_tokens)
+
+
+@router.post("/projects/{project_id}/gate-policy", response_model=ProjectSnapshot)
+def set_gate_policy(
+    project_id: str,
+    body: GatePolicyUpdate,
+    service: PlanningService = Depends(get_service),
+) -> ProjectSnapshot:
+    return service.set_gate_policy(project_id, body.gate_policy)
 
 
 @router.patch("/projects/{project_id}/interpretation", response_model=ProjectSnapshot)
