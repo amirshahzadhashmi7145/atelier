@@ -49,6 +49,7 @@ export type Snapshot = {
     test_strategy: Record<string, string> | null;
     github_repo: string | null;
     paused: boolean;
+    agents_revoked?: boolean;
     spend_ceiling_tokens?: number;
     spend_tokens?: number;
     spend_alerts?: number[];

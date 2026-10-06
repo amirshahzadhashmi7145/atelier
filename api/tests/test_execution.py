@@ -288,6 +288,25 @@ def test_a_paused_project_refuses_to_run_tasks(tmp_path: Path):
     resumed = client.post(f"/api/projects/{project_id}/unpause")
     assert resumed.json()["project"]["paused"] is False
     assert "pause" in resumed.json()["project"]["next_actions"]
+
+
+def test_revoking_agents_blocks_runs_but_keeps_human_actions(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    revoked = client.post(f"/api/projects/{project_id}/revoke-agents")
+    assert revoked.status_code == 200, revoked.text
+    body = revoked.json()["project"]
+    assert body["agents_revoked"] is True
+    assert "restore_agents" in body["next_actions"]
+    assert "run_ready" not in body["next_actions"]
+    assert "pause" in body["next_actions"]
+    refused = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert refused.status_code == 409
+    assert "revoked" in refused.json()["detail"]
+    restored = client.post(f"/api/projects/{project_id}/restore-agents")
+    assert restored.json()["project"]["agents_revoked"] is False
+    assert "revoke_agents" in restored.json()["project"]["next_actions"]
+    assert "run_ready" in restored.json()["project"]["next_actions"]
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
     assert ran.status_code == 200, ran.text
     assert _by_key(ran.json(), "TASK-001")["state"] == "in_review"

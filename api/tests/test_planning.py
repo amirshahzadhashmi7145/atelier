@@ -53,6 +53,24 @@ def test_a_paused_project_blocks_planning_steps():
     assert interpreted.status_code == 200
 
 
+def test_revoking_agents_blocks_planning_but_allows_restore():
+    client = client_for()
+    project_id = _create(client)
+    revoked = client.post(f"/api/projects/{project_id}/revoke-agents")
+    assert revoked.status_code == 200
+    assert revoked.json()["project"]["agents_revoked"] is True
+    assert "interpret" not in revoked.json()["project"]["next_actions"]
+    assert "restore_agents" in revoked.json()["project"]["next_actions"]
+    refused = client.post(f"/api/projects/{project_id}/interpret")
+    assert refused.status_code == 409
+    assert "revoked" in refused.json()["detail"]
+    restored = client.post(f"/api/projects/{project_id}/restore-agents")
+    assert restored.json()["project"]["agents_revoked"] is False
+    assert "interpret" in restored.json()["project"]["next_actions"]
+    again = client.post(f"/api/projects/{project_id}/interpret")
+    assert again.status_code == 200, again.text
+
+
 def test_planning_spend_is_broken_down_by_role():
     client = client_for()
     project_id = _create(client)

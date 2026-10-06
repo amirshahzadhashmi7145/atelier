@@ -34,6 +34,7 @@ class Project(Base):
     test_strategy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     github_repo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     paused: Mapped[bool] = mapped_column(default=False)
+    agents_revoked: Mapped[bool] = mapped_column(default=False)
     spend_ceiling_tokens: Mapped[int] = mapped_column(Integer, default=1_000_000)
     gate_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

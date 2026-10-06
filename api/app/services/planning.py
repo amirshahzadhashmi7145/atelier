@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import pm
 from app.config import Settings
-from app.domain.control import require_active
+from app.domain.control import filter_actions, require_active, require_agents
 from app.domain.gates import (
     DEFAULT_GATE_POLICY,
     is_automatic,
@@ -94,7 +94,7 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
-def _actions(stage: str, tasks: list, *, paused: bool) -> list[str]:
+def _actions(stage: str, tasks: list, *, paused: bool, agents_revoked: bool) -> list[str]:
     if paused:
         return ["unpause"]
     actions = next_actions(PlanStage(stage))
@@ -102,7 +102,10 @@ def _actions(stage: str, tasks: list, *, paused: bool) -> list[str]:
         actions = [*actions, "run_ready"]
     if any(task.state == "escalated" for task in tasks):
         actions = [*actions, "resume_escalated"]
-    return [*actions, "pause"]
+    actions = filter_actions(actions, agents_revoked=agents_revoked)
+    if agents_revoked:
+        return [*actions, "restore_agents", "pause"]
+    return [*actions, "revoke_agents", "pause"]
 
 
 class _Question(BaseModel):
@@ -239,6 +242,36 @@ class PlanningService:
         )
         return self.snapshot(project_id)
 
+    def revoke_agents(self, project_id: str) -> ProjectSnapshot:
+        project = self._project(project_id)
+        require_active(paused=bool(project.paused))
+        if project.agents_revoked:
+            return self.snapshot(project_id)
+        project.agents_revoked = True
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.agents_revoked",
+            actor_kind="user",
+            payload={"summary": "A person revoked agent authority."},
+        )
+        return self.snapshot(project_id)
+
+    def restore_agents(self, project_id: str) -> ProjectSnapshot:
+        project = self._project(project_id)
+        require_active(paused=bool(project.paused))
+        if not project.agents_revoked:
+            return self.snapshot(project_id)
+        project.agents_revoked = False
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.agents_restored",
+            actor_kind="user",
+            payload={"summary": "A person restored agent authority."},
+        )
+        return self.snapshot(project_id)
+
     def set_gate_policy(
         self,
         project_id: str,
@@ -343,7 +376,12 @@ class PlanningService:
             uncovered = []
         spent = tokens_used(project.runs)
         estimate = sum(int(task.estimate_tokens or 0) for task in tasks)
-        actions = _actions(project.stage, tasks, paused=bool(project.paused))
+        actions = _actions(
+            project.stage,
+            tasks,
+            paused=bool(project.paused),
+            agents_revoked=bool(project.agents_revoked),
+        )
         gate_list = open_gates(next_actions=actions, tasks=tasks)
         status = ProjectStatusOut(
             task_counts=task_counts(tasks),
@@ -377,6 +415,7 @@ class PlanningService:
                 test_strategy=project.test_strategy,
                 github_repo=project.github_repo,
                 paused=bool(project.paused),
+                agents_revoked=bool(project.agents_revoked),
                 spend_ceiling_tokens=project.spend_ceiling_tokens,
                 spend_tokens=spent,
                 spend_alerts=self._spend_alerts(project),
@@ -546,6 +585,7 @@ class PlanningService:
     def interpret(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
         require_active(paused=bool(project.paused))
+        require_agents(agents_revoked=bool(project.agents_revoked))
         self._require_stage(project, {PlanStage.INTAKE})
         system, user = pm.interpret_prompt(project.description, project.tech_preferences)
         result = self._complete(project, "interpret", system, user)
@@ -609,6 +649,7 @@ class PlanningService:
             self._move(project, PlanStage.INTERPRETED)
             return self.snapshot(project.id)
 
+        require_agents(agents_revoked=bool(project.agents_revoked))
         system, user = pm.followup_prompt(self._transcript(project))
         result = self._complete(project, "followup", system, user)
         followup = _parse(_Followup, result.data)
@@ -653,6 +694,7 @@ class PlanningService:
     def generate_requirements(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
         require_active(paused=bool(project.paused))
+        require_agents(agents_revoked=bool(project.agents_revoked))
         rewriting = project.stage == PlanStage.REQUIREMENTS_DRAFT.value
         if not rewriting:
             self._require_stage(project, {PlanStage.INTERPRETED})
@@ -739,6 +781,7 @@ class PlanningService:
     def generate_architecture(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
         require_active(paused=bool(project.paused))
+        require_agents(agents_revoked=bool(project.agents_revoked))
         rewriting = project.stage == PlanStage.ARCHITECTURE_DRAFT.value
         if not rewriting:
             self._require_stage(project, {PlanStage.REQUIREMENTS_APPROVED})
@@ -787,6 +830,7 @@ class PlanningService:
     def generate_tasks(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
         require_active(paused=bool(project.paused))
+        require_agents(agents_revoked=bool(project.agents_revoked))
         self._require_stage(project, {PlanStage.ARCHITECTURE_APPROVED})
         requirements = sorted(project.requirements, key=lambda item: item.sort_order)
         if not requirements:

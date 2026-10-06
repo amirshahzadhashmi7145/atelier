@@ -16,7 +16,7 @@ from app.agents.developer import implement_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
-from app.domain.control import require_active
+from app.domain.control import require_active, require_agents
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.gates import is_automatic
@@ -91,6 +91,7 @@ class ExecutionService:
     def run_next(self, project_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
         require_active(paused=bool(project.paused))
+        require_agents(agents_revoked=bool(project.agents_revoked))
         self._guard_spend(project)
         task = self._claim(project)
         try:
@@ -102,6 +103,7 @@ class ExecutionService:
     def review(self, project_id: str, task_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
         require_active(paused=bool(project.paused))
+        require_agents(agents_revoked=bool(project.agents_revoked))
         self._guard_spend(project)
         task = self._task(project, task_id)
         if task.state != TaskState.IN_REVIEW.value:
