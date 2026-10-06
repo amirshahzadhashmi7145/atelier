@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents import pm
+from app.domain.control import require_active
 from app.domain.graph import require_acyclic
 from app.domain.plan_stage import PlanStage, next_actions, transition
 from app.domain.task_machine import place
@@ -64,13 +65,15 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
-def _actions(stage: str, tasks: list) -> list[str]:
+def _actions(stage: str, tasks: list, *, paused: bool) -> list[str]:
+    if paused:
+        return ["unpause"]
     actions = next_actions(PlanStage(stage))
     if any(task.state == "ready" for task in tasks):
         actions = [*actions, "run_ready"]
     if any(task.state == "escalated" for task in tasks):
         actions = [*actions, "resume_escalated"]
-    return actions
+    return [*actions, "pause"]
 
 
 class _Question(BaseModel):
@@ -173,6 +176,34 @@ class PlanningService:
         self._event(project, "project.created", actor_kind="user", payload={"name": project.name})
         return self.snapshot(project.id)
 
+    def pause(self, project_id: str) -> ProjectSnapshot:
+        project = self._project(project_id)
+        if project.paused:
+            return self.snapshot(project_id)
+        project.paused = True
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.paused",
+            actor_kind="user",
+            payload={"summary": "A person paused the project."},
+        )
+        return self.snapshot(project_id)
+
+    def unpause(self, project_id: str) -> ProjectSnapshot:
+        project = self._project(project_id)
+        if not project.paused:
+            return self.snapshot(project_id)
+        project.paused = False
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.unpaused",
+            actor_kind="user",
+            payload={"summary": "A person unpaused the project."},
+        )
+        return self.snapshot(project_id)
+
     def list_projects(self) -> list[ProjectListItem]:
         rows = self.session.scalars(select(Project).order_by(Project.created_at.desc())).all()
         return [
@@ -229,8 +260,9 @@ class PlanningService:
                 architecture_summary=project.architecture_summary,
                 test_strategy=project.test_strategy,
                 github_repo=project.github_repo,
+                paused=bool(project.paused),
                 created_at=project.created_at,
-                next_actions=_actions(project.stage, tasks),
+                next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
                 uncovered_requirement_keys=uncovered,
             ),
             clarifications=[
@@ -374,6 +406,7 @@ class PlanningService:
 
     def interpret(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
+        require_active(paused=bool(project.paused))
         self._require_stage(project, {PlanStage.INTAKE})
         system, user = pm.interpret_prompt(project.description, project.tech_preferences)
         result = self._complete(project, "interpret", system, user)
@@ -407,6 +440,7 @@ class PlanningService:
         proceed: bool,
     ) -> ProjectSnapshot:
         project = self._project(project_id)
+        require_active(paused=bool(project.paused))
         self._require_stage(project, {PlanStage.CLARIFYING})
         by_id = {item_id: text for item_id, text in answers}
         open_items = [item for item in project.clarifications if item.status == "open"]
@@ -478,6 +512,7 @@ class PlanningService:
 
     def generate_requirements(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
+        require_active(paused=bool(project.paused))
         rewriting = project.stage == PlanStage.REQUIREMENTS_DRAFT.value
         if not rewriting:
             self._require_stage(project, {PlanStage.INTERPRETED})
@@ -560,6 +595,7 @@ class PlanningService:
 
     def generate_architecture(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
+        require_active(paused=bool(project.paused))
         rewriting = project.stage == PlanStage.ARCHITECTURE_DRAFT.value
         if not rewriting:
             self._require_stage(project, {PlanStage.REQUIREMENTS_APPROVED})
@@ -604,6 +640,7 @@ class PlanningService:
 
     def generate_tasks(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
+        require_active(paused=bool(project.paused))
         self._require_stage(project, {PlanStage.ARCHITECTURE_APPROVED})
         requirements = sorted(project.requirements, key=lambda item: item.sort_order)
         if not requirements:

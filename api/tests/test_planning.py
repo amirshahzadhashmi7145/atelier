@@ -38,6 +38,21 @@ def _answer_open(client: TestClient, project_id: str, text: str = "Signed-in tea
     return response.json()
 
 
+def test_a_paused_project_blocks_planning_steps():
+    client = client_for()
+    project_id = _create(client)
+    paused = client.post(f"/api/projects/{project_id}/pause")
+    assert paused.status_code == 200
+    assert paused.json()["project"]["paused"] is True
+    assert paused.json()["project"]["next_actions"] == ["unpause"]
+    refused = client.post(f"/api/projects/{project_id}/interpret")
+    assert refused.status_code == 409
+    assert "paused" in refused.json()["detail"]
+    client.post(f"/api/projects/{project_id}/unpause")
+    interpreted = client.post(f"/api/projects/{project_id}/interpret")
+    assert interpreted.status_code == 200
+
+
 def test_happy_path_stops_at_a_task_graph():
     client = client_for()
     project_id = _create(client)
@@ -48,6 +63,7 @@ def test_happy_path_stops_at_a_task_graph():
     assert body["project"]["stage"] == "clarifying"
     assert len(body["clarifications"]) == 3
     assert "interpret" not in body["project"]["next_actions"]
+    assert "pause" in body["project"]["next_actions"]
 
     closed = _answer_open(client, project_id)
     assert closed["project"]["stage"] == "interpreted"

@@ -16,6 +16,7 @@ from app.agents.developer import implement_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
+from app.domain.control import require_active
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.schedule import ClaimCandidate, choose_next
@@ -64,6 +65,7 @@ class ExecutionService:
 
     def run_next(self, project_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._claim(project)
         try:
             self._execute(project, task)
@@ -73,6 +75,7 @@ class ExecutionService:
 
     def review(self, project_id: str, task_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.IN_REVIEW.value:
             raise DomainError("Only a task that is in review can be checked.")
@@ -200,6 +203,7 @@ class ExecutionService:
 
     def accept(self, project_id: str, task_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.GATED.value:
             raise DomainError("Only a task that passed review can be accepted.")
@@ -276,6 +280,7 @@ class ExecutionService:
         """A person returns an escalated task to the ready queue."""
 
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.ESCALATED.value:
             raise DomainError("Only an escalated task can be resumed.")
@@ -297,6 +302,7 @@ class ExecutionService:
         """A person settles criteria the review could not execute."""
 
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.IN_REVIEW.value:
             raise DomainError("Only a task that is in review can be decided.")

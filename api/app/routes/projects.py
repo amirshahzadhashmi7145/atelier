@@ -59,6 +59,16 @@ def get_project(project_id: str, service: PlanningService = Depends(get_service)
     return service.snapshot(project_id)
 
 
+@router.post("/projects/{project_id}/pause", response_model=ProjectSnapshot)
+def pause_project(project_id: str, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
+    return service.pause(project_id)
+
+
+@router.post("/projects/{project_id}/unpause", response_model=ProjectSnapshot)
+def unpause_project(project_id: str, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
+    return service.unpause(project_id)
+
+
 @router.patch("/projects/{project_id}/interpretation", response_model=ProjectSnapshot)
 def update_interpretation(
     project_id: str,
