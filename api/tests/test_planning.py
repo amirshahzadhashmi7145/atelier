@@ -163,6 +163,29 @@ def test_projects_start_with_human_gate_policy():
     assert body["project"]["gate_policy"]["deployment"] == "human"
 
 
+def test_automatic_merge_needs_an_acknowledgement():
+    client = client_for()
+    project_id = _create(client)
+    refused = client.post(
+        f"/api/projects/{project_id}/gate-policy",
+        json={"gate_policy": {"merge": "automatic"}},
+    )
+    assert refused.status_code == 422
+    assert "acknowledgement" in refused.json()["detail"].lower()
+    accepted = client.post(
+        f"/api/projects/{project_id}/gate-policy",
+        json={
+            "gate_policy": {"merge": "automatic"},
+            "acknowledgement": "I accept unattended merges.",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    body = accepted.json()
+    assert body["project"]["gate_policy"]["merge"] == "automatic"
+    event = next(item for item in body["events"] if item["type"] == "project.gate_policy")
+    assert event["payload"]["acknowledgement"] == "I accept unattended merges."
+
+
 def test_automatic_requirements_gate_approves_without_a_person():
     client = client_for()
     project_id = _create(client)

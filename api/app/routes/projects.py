@@ -94,7 +94,11 @@ def set_gate_policy(
     body: GatePolicyUpdate,
     service: PlanningService = Depends(get_service),
 ) -> ProjectSnapshot:
-    return service.set_gate_policy(project_id, body.gate_policy)
+    return service.set_gate_policy(
+        project_id,
+        body.gate_policy,
+        acknowledgement=body.acknowledgement,
+    )
 
 
 @router.patch("/projects/{project_id}/interpretation", response_model=ProjectSnapshot)

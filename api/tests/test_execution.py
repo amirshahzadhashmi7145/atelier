@@ -113,9 +113,17 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
 def test_automatic_merge_gate_accepts_after_review(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)
-    client.post(
+    policy = client.post(
         f"/api/projects/{project_id}/gate-policy",
-        json={"gate_policy": {"merge": "automatic"}},
+        json={
+            "gate_policy": {"merge": "automatic"},
+            "acknowledgement": "I accept unattended merges for this project.",
+        },
+    )
+    assert policy.status_code == 200, policy.text
+    assert any(
+        event["type"] == "project.gate_policy" and event["payload"].get("acknowledgement")
+        for event in policy.json()["events"]
     )
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
     first = _by_key(ran.json(), "TASK-001")
