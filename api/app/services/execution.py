@@ -22,7 +22,7 @@ from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.gates import is_automatic
 from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
-from app.domain.task_machine import TaskState, require_reassignable, transition
+from app.domain.task_machine import TaskState, require_amendable, require_reassignable, transition
 from app.domain.validation import ALLOWED_ZONES
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
@@ -347,7 +347,9 @@ class ExecutionService:
     def task_detail(self, project_id: str, task_id: str) -> TaskDetailOut:
         """Drill from a task to its runs, checks, PR, and branch diff."""
 
+        self.session.flush()
         project = self.planning._project(project_id)
+        self.session.expire(project)
         task = self._task(project, task_id)
         key_by_id = {item.id: item.key for item in project.tasks}
         task_out = TaskOut(
@@ -465,6 +467,47 @@ class ExecutionService:
             diff=diff,
             diff_truncated=truncated,
         )
+
+    def amend(
+        self,
+        project_id: str,
+        task_id: str,
+        *,
+        path: str,
+        content: str,
+        summary: str,
+    ) -> TaskDetailOut:
+        """A person edits a file on the task branch; the next run sees it."""
+
+        project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        task = self._task(project, task_id)
+        require_amendable(task.state, branch_name=task.branch_name)
+        relative = path.strip().replace("\\", "/").lstrip("./")
+        if not relative:
+            raise DomainError("A file path is required.", status_code=422)
+        rules = [(rule.glob, rule.zone) for rule in project.ownership]
+        require_inside_zone(relative, task.zone, rules)
+        workspace = Workspace(self._root(project))
+        try:
+            workspace.ensure()
+            workspace.start_branch(task.branch_name)
+            workspace.commit(task.key, summary.strip(), [(relative, content)])
+        except RuntimeError as exc:
+            raise DomainError(f"The branch could not be amended: {exc}") from exc
+        self.planning._event(
+            project,
+            "task.branch_amended",
+            actor_kind="user",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "path": relative,
+                "summary": summary.strip(),
+                "branch": task.branch_name,
+            },
+        )
+        return self.task_detail(project_id, task_id)
 
     def reassign(self, project_id: str, task_id: str, zone: str) -> ProjectSnapshot:
         """A person moves a waiting task to another ownership zone."""

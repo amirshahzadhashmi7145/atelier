@@ -1,6 +1,14 @@
 from app.domain.graph import find_cycle
 from app.domain.plan_stage import PlanStage, transition as plan_transition
-from app.domain.task_machine import TaskState, can_reassign, place, require_reassignable, transition
+from app.domain.task_machine import (
+    TaskState,
+    can_amend,
+    can_reassign,
+    place,
+    require_amendable,
+    require_reassignable,
+    transition,
+)
 from app.domain.validation import uncovered_requirements
 from app.errors import DomainError
 import pytest
@@ -48,6 +56,15 @@ def test_ready_and_blocked_tasks_can_be_reassigned():
     assert can_reassign(TaskState.GATED) is False
     with pytest.raises(DomainError):
         require_reassignable(TaskState.IN_REVIEW)
+
+
+def test_a_branch_can_be_amended_while_the_agent_is_not_writing():
+    assert can_amend(TaskState.IN_REVIEW) is True
+    assert can_amend(TaskState.GATED) is True
+    assert can_amend(TaskState.IN_PROGRESS) is False
+    with pytest.raises(DomainError):
+        require_amendable(TaskState.IN_REVIEW, branch_name=None)
+    require_amendable(TaskState.READY, branch_name="task/TASK-001")
 
 
 def test_cycle_is_reported_as_a_loop():

@@ -84,6 +84,39 @@ def test_task_detail_includes_runs_checks_pr_and_diff(tmp_path: Path):
     assert missing.status_code == 404
 
 
+def test_a_person_can_amend_a_file_on_the_task_branch(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    first = _by_key(ran.json(), "TASK-001")
+    amended = client.post(
+        f"/api/projects/{project_id}/tasks/{first['id']}/amend",
+        json={
+            "path": "server/app.py",
+            "content": "def create_record() -> dict:\n    return {\"id\": \"person\"}\n",
+            "summary": "Person fixed the return value.",
+        },
+    )
+    assert amended.status_code == 200, amended.text
+    body = amended.json()
+    assert "person" in (body["diff"] or "")
+    assert any(event["type"] == "task.branch_amended" for event in body["events"])
+    written = (tmp_path / project_id / "server" / "app.py").read_text()
+    assert "person" in written
+    outside = client.post(
+        f"/api/projects/{project_id}/tasks/{first['id']}/amend",
+        json={"path": "web/page.tsx", "content": "export default function Page() {}\n"},
+    )
+    assert outside.status_code == 422
+    ready = _by_key(client.get(f"/api/projects/{project_id}").json(), "TASK-002")
+    assert ready["state"] == "blocked"
+    no_branch = client.post(
+        f"/api/projects/{project_id}/tasks/{ready['id']}/amend",
+        json={"path": "server/app.py", "content": "x\n"},
+    )
+    assert no_branch.status_code == 422
+
+
 def test_a_person_can_reassign_a_ready_task_to_another_zone(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)
