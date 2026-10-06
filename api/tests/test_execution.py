@@ -154,6 +154,24 @@ def test_a_write_outside_the_zone_is_not_saved(tmp_path: Path):
     assert not (tmp_path / project_id / "web" / "nope.tsx").exists()
 
 
+def test_a_paused_project_refuses_to_run_tasks(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    paused = client.post(f"/api/projects/{project_id}/pause")
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["project"]["paused"] is True
+    assert paused.json()["project"]["next_actions"] == ["unpause"]
+    refused = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert refused.status_code == 409
+    assert "paused" in refused.json()["detail"]
+    resumed = client.post(f"/api/projects/{project_id}/unpause")
+    assert resumed.json()["project"]["paused"] is False
+    assert "pause" in resumed.json()["project"]["next_actions"]
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    assert _by_key(ran.json(), "TASK-001")["state"] == "in_review"
+
+
 def test_an_escalated_task_can_be_resumed_by_a_person(tmp_path: Path):
     client = client_for(tmp_path, _OutsideZone())
     project_id = _prepare(client)

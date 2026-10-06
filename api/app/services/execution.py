@@ -16,8 +16,10 @@ from app.agents.developer import implement_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
+from app.domain.control import require_active
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
+from app.domain.spend import require_spend_room, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
 from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
@@ -64,6 +66,8 @@ class ExecutionService:
 
     def run_next(self, project_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        self._guard_spend(project)
         task = self._claim(project)
         try:
             self._execute(project, task)
@@ -73,6 +77,8 @@ class ExecutionService:
 
     def review(self, project_id: str, task_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        self._guard_spend(project)
         task = self._task(project, task_id)
         if task.state != TaskState.IN_REVIEW.value:
             raise DomainError("Only a task that is in review can be checked.")
@@ -200,6 +206,7 @@ class ExecutionService:
 
     def accept(self, project_id: str, task_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.GATED.value:
             raise DomainError("Only a task that passed review can be accepted.")
@@ -276,6 +283,7 @@ class ExecutionService:
         """A person returns an escalated task to the ready queue."""
 
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.ESCALATED.value:
             raise DomainError("Only an escalated task can be resumed.")
@@ -297,6 +305,7 @@ class ExecutionService:
         """A person settles criteria the review could not execute."""
 
         project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
         if task.state != TaskState.IN_REVIEW.value:
             raise DomainError("Only a task that is in review can be decided.")
@@ -495,6 +504,27 @@ class ExecutionService:
             cpus=self.settings.sandbox_cpus,
             pids_limit=self.settings.sandbox_pids_limit,
         )
+
+    def _guard_spend(self, project: Project) -> None:
+        spent = tokens_used(project.runs)
+        ceiling = project.spend_ceiling_tokens
+        if spent < ceiling:
+            return
+        if not project.paused:
+            project.paused = True
+            self.planning._event(
+                project,
+                "project.spend_ceiling",
+                actor_kind="system",
+                payload={
+                    "spend_tokens": spent,
+                    "spend_ceiling_tokens": ceiling,
+                    "summary": f"Spend reached {spent} of {ceiling} tokens. The project was paused.",
+                },
+            )
+            # Persist the pause even though the refused step will roll back.
+            self.session.commit()
+        require_spend_room(spent=spent, ceiling=ceiling)
 
     def _open_pull_request(
         self,

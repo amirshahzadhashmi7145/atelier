@@ -33,6 +33,8 @@ class Project(Base):
     architecture_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_strategy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     github_repo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    paused: Mapped[bool] = mapped_column(default=False)
+    spend_ceiling_tokens: Mapped[int] = mapped_column(Integer, default=1_000_000)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

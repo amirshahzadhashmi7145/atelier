@@ -47,6 +47,9 @@ export type Snapshot = {
     architecture_summary: string | null;
     test_strategy: Record<string, string> | null;
     github_repo: string | null;
+    paused: boolean;
+    spend_ceiling_tokens?: number;
+    spend_tokens?: number;
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];

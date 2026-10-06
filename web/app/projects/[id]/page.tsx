@@ -35,6 +35,7 @@ export default function ProjectPage() {
   const [editingInterpretation, setEditingInterpretation] = useState(false);
   const [interpretation, setInterpretation] = useState("");
   const [editingRequirement, setEditingRequirement] = useState<string | null>(null);
+  const [ceilingInput, setCeilingInput] = useState("");
 
   async function refresh() {
     const next = await loadProject(params.id);
@@ -73,6 +74,8 @@ export default function ProjectPage() {
   const can = (action: string) => project.next_actions.includes(action);
   const current = RAIL.findIndex((step) => step.match(project.stage));
   const usingFake = snapshot.runs.some((run) => run.provider === "fake");
+  const spendTokens = project.spend_tokens ?? 0;
+  const spendCeiling = project.spend_ceiling_tokens ?? 0;
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
@@ -98,7 +101,76 @@ export default function ProjectPage() {
           {project.tech_preferences ? (
             <p className="mt-2 text-sm text-muted">Preferences: {project.tech_preferences}</p>
           ) : null}
+          {project.github_repo ? (
+            <p className="mt-2 text-sm text-muted">GitHub: {project.github_repo}</p>
+          ) : null}
+          <p className="mt-2 text-sm text-muted">
+            Spend: {spendTokens.toLocaleString()} / {spendCeiling.toLocaleString()} tokens
+          </p>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            {can("pause") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="border border-ink px-3 py-2 text-sm"
+                onClick={() => run(() => api(`/api/projects/${project.id}/pause`, { method: "POST" }))}
+              >
+                Pause project
+              </button>
+            ) : null}
+            {can("unpause") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="bg-moss px-3 py-2 text-sm text-white"
+                onClick={() => run(() => api(`/api/projects/${project.id}/unpause`, { method: "POST" }))}
+              >
+                Unpause project
+              </button>
+            ) : null}
+            <label className="text-sm">
+              Raise ceiling
+              <span className="mt-1 flex gap-2">
+                <input
+                  type="number"
+                  min={spendTokens || 1}
+                  value={ceilingInput}
+                  onChange={(event) => setCeilingInput(event.target.value)}
+                  placeholder={String(spendCeiling || "")}
+                  className="w-40 border border-line bg-paper px-3 py-2"
+                />
+                <button
+                  type="button"
+                  disabled={busy || !ceilingInput}
+                  className="border border-ink px-3 py-2 text-sm"
+                  onClick={() =>
+                    run(() =>
+                      api(`/api/projects/${project.id}/spend-ceiling`, {
+                        method: "POST",
+                        body: JSON.stringify({ spend_ceiling_tokens: Number(ceilingInput) }),
+                      }),
+                    ).then((next) => {
+                      setCeilingInput("");
+                      return next;
+                    })
+                  }
+                >
+                  Save
+                </button>
+              </span>
+            </label>
+          </div>
         </header>
+
+        {project.paused ? (
+          <p className="border border-oxide bg-oxide-soft px-4 py-3 text-sm">
+            This project is paused. Planning and task runs will not continue until you unpause it
+            {spendCeiling > 0 && spendTokens >= spendCeiling
+              ? " and raise the spend ceiling if it was hit"
+              : ""}
+            .
+          </p>
+        ) : null}
 
         {usingFake ? (
           <p className="border border-line bg-oxide-soft px-4 py-3 text-sm">
@@ -488,7 +560,7 @@ export default function ProjectPage() {
                     {task.state === "escalated" ? (
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || project.paused}
                         className="mt-2 bg-oxide px-3 py-2 text-sm text-white"
                         onClick={() =>
                           run(() => api(`/api/projects/${project.id}/tasks/${task.id}/resume`, { method: "POST" }))
@@ -501,7 +573,7 @@ export default function ProjectPage() {
                       <div className="mt-2 flex flex-wrap gap-3">
                         <button
                           type="button"
-                          disabled={busy}
+                          disabled={busy || project.paused}
                           className="bg-ink px-3 py-2 text-sm text-paper"
                           onClick={() =>
                             run(() => api(`/api/projects/${project.id}/tasks/${task.id}/review`, { method: "POST" }))
@@ -515,7 +587,7 @@ export default function ProjectPage() {
                           <>
                             <button
                               type="button"
-                              disabled={busy}
+                              disabled={busy || project.paused}
                               className="bg-moss px-3 py-2 text-sm text-white"
                               onClick={() =>
                                 run(() =>
@@ -530,7 +602,7 @@ export default function ProjectPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={busy}
+                              disabled={busy || project.paused}
                               className="border border-ink px-3 py-2 text-sm"
                               onClick={() =>
                                 run(() =>
@@ -550,7 +622,7 @@ export default function ProjectPage() {
                     {task.state === "gated" ? (
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || project.paused}
                         className="mt-2 bg-moss px-3 py-2 text-sm text-white"
                         onClick={() =>
                           run(() => api(`/api/projects/${project.id}/tasks/${task.id}/accept`, { method: "POST" }))

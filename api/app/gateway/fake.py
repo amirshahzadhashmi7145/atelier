@@ -24,8 +24,8 @@ class FakeLlm:
         }[purpose]
         return LlmResult(
             data=builder(user),
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=25,
+            output_tokens=25,
             provider=self.provider,
             model=self.model,
         )

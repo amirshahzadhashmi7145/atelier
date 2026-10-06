@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     sandbox_pids_limit: int = 64
     github_token: str = ""
     github_api_url: str = "https://api.github.com"
+    default_spend_ceiling_tokens: int = 1_000_000
     workspaces_dir: str = "./workspaces"
 
     @property
