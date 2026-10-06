@@ -1,4 +1,4 @@
-from app.domain.dependencies import dependency_files
+from app.domain.dependencies import dependency_files, forbidden_dependency_sources
 from app.domain.pull_request import CheckLine, compose
 from app.services.github import open_pull_request
 from unittest.mock import patch
@@ -45,6 +45,27 @@ diff --git a/server/app.py b/server/app.py
 +print(1)
 """
     assert dependency_files(diff) == ["server/requirements.txt"]
+
+
+def test_dependency_urls_outside_the_allowlist_are_rejected():
+    allowed = {"pypi.org", "files.pythonhosted.org"}
+    assert (
+        forbidden_dependency_sources(
+            writes=[("server/requirements.txt", "fastapi\n")],
+            allowed_hosts=allowed,
+        )
+        == []
+    )
+    blocked = forbidden_dependency_sources(
+        writes=[
+            (
+                "server/requirements.txt",
+                "evil @ https://evil.example/pkg.whl\n",
+            )
+        ],
+        allowed_hosts=allowed,
+    )
+    assert blocked and "evil.example" in blocked[0]
 
 
 def test_github_open_pull_request_posts_the_draft():

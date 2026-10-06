@@ -18,7 +18,7 @@ from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
-from app.domain.dependencies import dependency_files
+from app.domain.dependencies import dependency_files, forbidden_dependency_sources
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
@@ -143,6 +143,27 @@ class ExecutionService:
                 ],
                 "The branch weakens existing tests. The task is ready for another attempt.",
                 event_type="qa.tests_weakened",
+            )
+            return self.planning.snapshot(project.id)
+        blocked_deps = forbidden_dependency_sources(
+            diff=diff,
+            allowed_hosts=self.settings.allowed_dependency_host_set,
+        )
+        if blocked_deps:
+            self._send_back(
+                project,
+                task,
+                [
+                    (
+                        "deps/registry",
+                        "Inspect dependency manifests for package sources.",
+                        "; ".join(blocked_deps),
+                        "Dependencies only come from the configured package registries.",
+                    )
+                ],
+                "The branch pulls dependencies from a blocked registry. "
+                "The task is ready for another attempt.",
+                event_type="qa.deps_blocked",
             )
             return self.planning.snapshot(project.id)
         sandbox = self._sandbox()
@@ -750,6 +771,16 @@ class ExecutionService:
             if not summary:
                 raise DomainError("The agent finished without a summary.", status_code=422)
             writes = [(item.path, item.content) for item in parsed.writes]
+            blocked_deps = forbidden_dependency_sources(
+                writes=writes,
+                allowed_hosts=self.settings.allowed_dependency_host_set,
+            )
+            if blocked_deps:
+                raise DomainError(
+                    "Dependencies must use the configured package registries. "
+                    + " ".join(blocked_deps),
+                    status_code=422,
+                )
             try:
                 workspace.apply(writes)
             except RuntimeError as exc:
