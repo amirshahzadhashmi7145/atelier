@@ -1,9 +1,9 @@
 """A local git checkout for one project.
 
-This is not a container. It is the first place an agent is allowed to
-write, and the zone check happens before any file is created. A later
-step replaces this directory with an isolated sandbox. The branch and
-the merge stay the same either way.
+Agents propose file contents; this module is the only writer. Declared
+tests run against the working tree before a commit is created. A later
+step can move that tree into an isolated sandbox; the branch and the
+merge stay the same either way.
 """
 
 import subprocess
@@ -34,14 +34,28 @@ class Workspace:
         else:
             self._git("checkout", "-b", branch)
 
-    def commit(self, key: str, summary: str, writes: list[tuple[str, str]]) -> None:
+    def apply(self, writes: list[tuple[str, str]]) -> None:
+        """Write files and stage them. Does not create a commit."""
+
         for relative, content in writes:
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
             self._git("add", "--", relative)
+
+    def commit_staged(self, key: str, summary: str) -> None:
         message = f"{key}: {summary}".replace("\n", " ")
         self._git("commit", "-m", message)
+
+    def commit(self, key: str, summary: str, writes: list[tuple[str, str]]) -> None:
+        self.apply(writes)
+        self.commit_staged(key, summary)
+
+    def discard(self) -> None:
+        """Drop uncommitted changes so a failed check leaves no residue."""
+
+        self._git("reset", "--hard", "HEAD")
+        self._git("clean", "-fd")
 
     def diff(self, branch: str) -> str:
         return self._git("diff", f"main...{branch}")
