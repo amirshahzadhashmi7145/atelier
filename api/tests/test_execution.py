@@ -322,6 +322,16 @@ def test_revoking_agents_blocks_runs_but_keeps_human_actions(tmp_path: Path):
     assert _by_key(ran.json(), "TASK-001")["state"] == "in_review"
 
 
+def test_an_underspecified_task_escalates_instead_of_inventing(tmp_path: Path):
+    client = client_for(tmp_path, _NeedsClarify())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    assert _by_key(body, "TASK-001")["state"] == "escalated"
+    event = next(item for item in body["events"] if item["type"] == "task.needs_clarification")
+    assert "status codes" in event["payload"]["clarification"]
+    assert not (tmp_path / project_id / "server" / "app.py").exists()
 def test_a_person_can_cancel_a_waiting_task(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)
@@ -719,6 +729,25 @@ class _NeverDone(FakeLlm):
                     "summary": "Still working.",
                     "done": False,
                     "writes": [{"path": "server/app.py", "content": f"step {self.calls}\n"}],
+                },
+                input_tokens=1,
+                output_tokens=1,
+                provider=self.provider,
+                model=self.model,
+            )
+        return super().complete_json(purpose=purpose, system=system, user=user)
+
+
+class _NeedsClarify(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "implement":
+            return LlmResult(
+                data={
+                    "summary": "Need a decision.",
+                    "done": False,
+                    "needs_clarification": True,
+                    "clarification": "Which status codes should create return on success?",
+                    "writes": [],
                 },
                 input_tokens=1,
                 output_tokens=1,
