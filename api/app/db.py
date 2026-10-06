@@ -48,9 +48,13 @@ def align_schema(engine: Engine) -> None:
     """
 
     inspector = inspect(engine)
-    if not inspector.has_table("tasks"):
-        return
-    names = {column["name"] for column in inspector.get_columns("tasks")}
-    if "branch_name" not in names:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE tasks ADD COLUMN branch_name VARCHAR(200)"))
+    if inspector.has_table("tasks"):
+        names = {column["name"] for column in inspector.get_columns("tasks")}
+        if "branch_name" not in names:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE tasks ADD COLUMN branch_name VARCHAR(200)"))
+    if inspector.has_table("projects"):
+        names = {column["name"] for column in inspector.get_columns("projects")}
+        if "github_repo" not in names:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE projects ADD COLUMN github_repo VARCHAR(200)"))

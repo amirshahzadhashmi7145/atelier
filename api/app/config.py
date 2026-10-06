@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     sandbox_memory: str = "256m"
     sandbox_cpus: str = "1"
     sandbox_pids_limit: int = 64
+    github_token: str = ""
+    github_api_url: str = "https://api.github.com"
     workspaces_dir: str = "./workspaces"
 
     @property

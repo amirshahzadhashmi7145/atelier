@@ -432,9 +432,10 @@ export default function ProjectPage() {
             <p className="mt-1 text-sm text-muted">
               Ready means the orchestrator may claim it. The agent writes only inside its zone, on a branch,
               and the architecture&apos;s test commands must pass in a container before that branch is
-              committed. Review runs those commands again, then checks the acceptance criteria. A failing
-              command sends the task back. A criterion the review cannot execute waits for you to waive it
-              or send the task back. Accepting a passed review merges it and unblocks whatever was waiting.
+              committed and a pull request is opened. Review runs those commands again, then checks the
+              acceptance criteria. A failing command sends the task back. A criterion the review cannot
+              execute waits for you to waive it or send the task back. Accepting a passed review merges it
+              and unblocks whatever was waiting.
             </p>
             {can("run_ready") ? (
               <button
@@ -539,6 +540,23 @@ export default function ProjectPage() {
                       </button>
                     ) : null}
                     <ul className="mt-2 space-y-1 text-sm">
+                      {snapshot.pull_requests
+                        .filter((pr) => pr.task_id === task.id)
+                        .map((pr) => (
+                          <li key={pr.id}>
+                            Pull request · {pr.state}
+                            {pr.number != null ? ` #${pr.number}` : ""} · {pr.title}
+                            {pr.url ? (
+                              <>
+                                {" "}
+                                ·{" "}
+                                <a href={pr.url} className="underline" target="_blank" rel="noreferrer">
+                                  open on GitHub
+                                </a>
+                              </>
+                            ) : null}
+                          </li>
+                        ))}
                       {snapshot.checks
                         .filter((check) => check.task_id === task.id)
                         .map((check) => (

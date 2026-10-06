@@ -75,6 +75,12 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert _by_key(body, "TASK-002")["state"] == "blocked"
     written = tmp_path / project_id / "server" / "app.py"
     assert "create_record" in written.read_text()
+    pr = next(item for item in body["pull_requests"] if item["task_id"] == first["id"])
+    assert pr["state"] == "open"
+    assert pr["title"].startswith("TASK-001:")
+    assert "FR-" in pr["body"]
+    assert "Test results" in pr["body"]
+    assert pr["url"] is None
 
     too_soon = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/accept")
     assert too_soon.status_code == 409
@@ -93,6 +99,7 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert _by_key(body, "TASK-002")["state"] == "ready"
     assert "run_ready" in body["project"]["next_actions"]
     assert "create_record" in (tmp_path / project_id / "server" / "app.py").read_text()
+    assert next(item for item in body["pull_requests"] if item["task_id"] == first["id"])["state"] == "merged"
 
 
 def test_a_task_in_review_is_not_claimed_again(tmp_path: Path):

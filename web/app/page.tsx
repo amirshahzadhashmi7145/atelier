@@ -13,6 +13,7 @@ export default function HomePage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [tech, setTech] = useState("");
+  const [githubRepo, setGithubRepo] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -32,6 +33,7 @@ export default function HomePage() {
         name,
         description,
         tech_preferences: tech || undefined,
+        github_repo: githubRepo || undefined,
       });
       router.push(`/projects/${snapshot.project.id}`);
     } catch (err) {
@@ -46,7 +48,8 @@ export default function HomePage() {
       <h1 className="font-serif mt-3 text-5xl leading-tight">Describe it. Approve the plan.</h1>
       <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted">
         A project manager turns the description into requirements and tasks. A developer writes
-        one task on a branch, QA checks it against the criteria, and you merge what passed.
+        one task on a branch and opens a pull request, QA checks it against the criteria, and you
+        merge what passed.
       </p>
 
       <form onSubmit={onSubmit} className="mt-10 space-y-4 border border-line bg-white/60 p-6">
@@ -69,6 +72,15 @@ export default function HomePage() {
             rows={5}
             className="mt-1 w-full border border-line bg-paper px-3 py-2"
             placeholder="A task manager with email login, projects, assignment, and due dates."
+          />
+        </label>
+        <label className="block text-sm">
+          GitHub repository <span className="text-muted">(optional, owner/name)</span>
+          <input
+            value={githubRepo}
+            onChange={(event) => setGithubRepo(event.target.value)}
+            className="mt-1 w-full border border-line bg-paper px-3 py-2"
+            placeholder="acme/notes"
           />
         </label>
         <label className="block text-sm">

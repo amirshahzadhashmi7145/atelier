@@ -16,14 +16,16 @@ from app.agents.developer import implement_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
+from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.schedule import ClaimCandidate, choose_next
 from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
-from app.models import AgentRun, CheckRun, CriterionFinding, Defect, Event, Project, Task
+from app.models import AgentRun, CheckRun, CriterionFinding, Defect, Event, Project, PullRequest, Task
 from app.services.checks import CheckResult, SandboxOptions, run_checks
+from app.services import github as github_api
 from app.schemas import ProjectSnapshot
 from app.services.planning import PlanningService, new_id
 from app.services.workspace import Workspace
@@ -208,6 +210,9 @@ class ExecutionService:
         except RuntimeError as exc:
             raise DomainError(f"The branch could not be merged: {exc}") from exc
         task.state, task.retry_count = self._move(task, TaskState.DONE)
+        for item in project.pull_requests:
+            if item.task_id == task.id and item.state == "open":
+                item.state = "merged"
         self.planning._event(
             project,
             "task.accepted",
@@ -325,6 +330,7 @@ class ExecutionService:
         )
         previous: tuple | None = None
         summary = ""
+        passed_checks: list[CheckResult] = []
         rework = self._rework_text(task)
         while True:
             budget.charge(0)
@@ -397,6 +403,7 @@ class ExecutionService:
                 workspace.commit_staged(task.key, summary)
             except RuntimeError as exc:
                 raise DomainError(f"The branch could not be committed: {exc}") from exc
+            passed_checks = checks
             break
         task.state, task.retry_count = self._move(task, TaskState.IN_REVIEW)
         self.planning._event(
@@ -407,6 +414,7 @@ class ExecutionService:
             task_id=task.id,
             payload={"key": task.key, "branch": branch, "summary": summary},
         )
+        self._open_pull_request(project, task, workspace, summary, passed_checks)
 
     def _sandbox(self) -> SandboxOptions | None:
         if not self.settings.check_sandbox:
@@ -416,6 +424,78 @@ class ExecutionService:
             memory=self.settings.sandbox_memory,
             cpus=self.settings.sandbox_cpus,
             pids_limit=self.settings.sandbox_pids_limit,
+        )
+
+    def _open_pull_request(
+        self,
+        project: Project,
+        task: Task,
+        workspace: Workspace,
+        summary: str,
+        checks: list[CheckResult],
+    ) -> None:
+        if any(item.task_id == task.id and item.state == "open" for item in project.pull_requests):
+            return
+        if not task.branch_name:
+            raise DomainError("This task has no branch for a pull request.")
+        draft = compose(
+            task_key=task.key,
+            title=task.title,
+            summary=summary,
+            requirement_keys=list(task.requirement_keys),
+            checks=[
+                CheckLine(
+                    tier=item.tier,
+                    command=item.command,
+                    exit_code=item.exit_code,
+                    excerpt=item.excerpt,
+                )
+                for item in checks
+            ],
+            assumptions=[item.statement for item in project.assumptions],
+        )
+        record = PullRequest(
+            id=new_id("pr"),
+            project_id=project.id,
+            task_id=task.id,
+            branch_name=task.branch_name,
+            title=draft.title,
+            body=draft.body,
+            state="open",
+        )
+        if project.github_repo and self.settings.github_token.strip():
+            remote = (
+                f"https://x-access-token:{self.settings.github_token}"
+                f"@github.com/{project.github_repo}.git"
+            )
+            try:
+                workspace.push(remote, task.branch_name)
+            except RuntimeError as exc:
+                raise DomainError(f"The branch could not be pushed: {exc}") from exc
+            remote_pr = github_api.open_pull_request(
+                api_url=self.settings.github_api_url,
+                token=self.settings.github_token,
+                repo=project.github_repo,
+                title=draft.title,
+                body=draft.body,
+                head=task.branch_name,
+            )
+            record.number = remote_pr.number
+            record.url = remote_pr.url
+        self.session.add(record)
+        self.planning._event(
+            project,
+            "pr.opened",
+            actor_kind="system",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "branch": task.branch_name,
+                "title": draft.title,
+                "number": record.number,
+                "url": record.url,
+                "summary": draft.title,
+            },
         )
 
     def _fail(self, project: Project, task: Task, cause: str) -> None:

@@ -14,6 +14,7 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1)
     tech_preferences: str | None = None
+    github_repo: str | None = None
 
 
 class InterpretationUpdate(BaseModel):
@@ -137,6 +138,17 @@ class CheckOut(BaseModel):
     excerpt: str
 
 
+class PullRequestOut(BaseModel):
+    id: str
+    task_id: str
+    branch_name: str
+    title: str
+    body: str
+    state: str
+    number: int | None = None
+    url: str | None = None
+
+
 class GateOut(BaseModel):
     id: str
     gate: str
@@ -178,6 +190,7 @@ class ProjectOut(BaseModel):
     max_rounds: int
     architecture_summary: str | None
     test_strategy: dict | None
+    github_repo: str | None = None
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]
@@ -195,6 +208,7 @@ class ProjectSnapshot(BaseModel):
     findings: list[FindingOut]
     defects: list[DefectOut]
     checks: list[CheckOut]
+    pull_requests: list[PullRequestOut]
     gates: list[GateOut]
     events: list[EventOut]
     runs: list[RunOut]

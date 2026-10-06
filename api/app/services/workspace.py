@@ -64,6 +64,16 @@ class Workspace:
         self._git("checkout", "main")
         self._git("merge", "--no-ff", branch, "-m", f"Accept {key}.")
 
+    def push(self, remote_url: str, branch: str) -> None:
+        """Publish the task branch. Replaces a prior origin if present."""
+
+        remotes = self._git("remote").split()
+        if "origin" in remotes:
+            self._git("remote", "set-url", "origin", remote_url)
+        else:
+            self._git("remote", "add", "origin", remote_url)
+        self._git("push", "-u", "origin", branch)
+
     def _git(self, *args: str) -> str:
         result = subprocess.run(
             ["git", *args],

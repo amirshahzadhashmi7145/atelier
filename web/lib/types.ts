@@ -46,6 +46,7 @@ export type Snapshot = {
     max_rounds: number;
     architecture_summary: string | null;
     test_strategy: Record<string, string> | null;
+    github_repo: string | null;
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];
@@ -86,6 +87,16 @@ export type Snapshot = {
     command: string;
     exit_code: number;
     excerpt: string;
+  }[];
+  pull_requests: {
+    id: string;
+    task_id: string;
+    branch_name: string;
+    title: string;
+    body: string;
+    state: string;
+    number: number | null;
+    url: string | null;
   }[];
   gates: { id: string; gate: string; decision: string; note: string | null; created_at: string }[];
   events: {
