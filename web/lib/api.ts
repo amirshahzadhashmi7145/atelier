@@ -1,4 +1,4 @@
-import type { ProjectListItem, Snapshot } from "./types";
+import type { ProjectListItem, Snapshot, TaskDetail } from "./types";
 
 function baseUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -23,6 +23,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const loadProjects = () => api<ProjectListItem[]>("/api/projects");
 export const loadProject = (id: string) => api<Snapshot>(`/api/projects/${id}`);
+export const loadTaskDetail = (projectId: string, taskId: string) =>
+  api<TaskDetail>(`/api/projects/${projectId}/tasks/${taskId}`);
 
 export function postProject(body: {
   name: string;

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, loadProject } from "@/lib/api";
-import type { Requirement, Snapshot } from "@/lib/types";
+import { api, loadProject, loadTaskDetail } from "@/lib/api";
+import type { Requirement, Snapshot, TaskDetail } from "@/lib/types";
 
 const RAIL = [
   { label: "Intake", hint: "The request, in your words", match: (stage: string) => stage === "intake" },
@@ -46,6 +46,9 @@ export default function ProjectPage() {
   const [editingRequirement, setEditingRequirement] = useState<string | null>(null);
   const [ceilingInput, setCeilingInput] = useState("");
   const [gateAck, setGateAck] = useState("");
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
 
   async function refresh() {
     const next = await loadProject(params.id);
@@ -58,6 +61,25 @@ export default function ProjectPage() {
     // The id is the only input. refresh closes over it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
+
+  async function inspectTask(taskId: string) {
+    if (openTaskId === taskId) {
+      setOpenTaskId(null);
+      setTaskDetail(null);
+      return;
+    }
+    setDetailBusy(true);
+    setError("");
+    try {
+      const detail = await loadTaskDetail(params.id, taskId);
+      setOpenTaskId(taskId);
+      setTaskDetail(detail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load that task.");
+    } finally {
+      setDetailBusy(false);
+    }
+  }
 
   async function run(action: () => Promise<Snapshot>): Promise<Snapshot | null> {
     setBusy(true);
@@ -717,6 +739,97 @@ export default function ProjectPage() {
                       {task.depends_on.length ? ` · waits on ${task.depends_on.join(", ")}` : " · nothing blocks it"}
                       {task.branch_name ? ` · ${task.branch_name}` : ""}
                     </p>
+                    <button
+                      type="button"
+                      disabled={detailBusy}
+                      className="mt-2 border border-ink px-3 py-1 text-sm"
+                      onClick={() => void inspectTask(task.id)}
+                    >
+                      {openTaskId === task.id ? "Hide detail" : "Inspect runs, diff, and checks"}
+                    </button>
+                    {openTaskId === task.id && taskDetail?.task.id === task.id ? (
+                      <div className="mt-3 space-y-3 border border-line bg-paper px-3 py-3 text-sm">
+                        <div>
+                          <p className="text-xs tracking-widest text-muted uppercase">Runs</p>
+                          {taskDetail.runs.length ? (
+                            <ul className="mt-1 space-y-1">
+                              {taskDetail.runs.map((item) => (
+                                <li key={item.id}>
+                                  {item.role} · {item.purpose} · {item.provider}/{item.model} ·{" "}
+                                  {item.input_tokens + item.output_tokens} tokens
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="mt-1 text-muted">No agent runs yet.</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-xs tracking-widest text-muted uppercase">Checks</p>
+                          {taskDetail.checks.length ? (
+                            <ul className="mt-1 space-y-1">
+                              {taskDetail.checks.map((check) => (
+                                <li key={check.id} className={check.exit_code === 0 ? "text-muted" : "text-oxide"}>
+                                  {check.tier} · exit {check.exit_code} · {check.command}
+                                  {check.excerpt ? (
+                                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-xs">{check.excerpt}</pre>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="mt-1 text-muted">No check output yet.</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-xs tracking-widest text-muted uppercase">Pull requests</p>
+                          {taskDetail.pull_requests.length ? (
+                            <ul className="mt-1 space-y-2">
+                              {taskDetail.pull_requests.map((pr) => (
+                                <li key={pr.id}>
+                                  <p>
+                                    {pr.state}
+                                    {pr.number != null ? ` #${pr.number}` : ""} · {pr.title}
+                                  </p>
+                                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-xs text-muted">
+                                    {pr.body}
+                                  </pre>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="mt-1 text-muted">No pull request yet.</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-xs tracking-widest text-muted uppercase">
+                            Diff{taskDetail.diff_truncated ? " (truncated)" : ""}
+                          </p>
+                          {taskDetail.diff ? (
+                            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-xs">
+                              {taskDetail.diff}
+                            </pre>
+                          ) : (
+                            <p className="mt-1 text-muted">No branch diff yet.</p>
+                          )}
+                        </div>
+                        {taskDetail.events.length ? (
+                          <div>
+                            <p className="text-xs tracking-widest text-muted uppercase">Task events</p>
+                            <ul className="mt-1 space-y-1 text-muted">
+                              {taskDetail.events.slice(0, 12).map((event) => (
+                                <li key={event.id}>
+                                  {event.type.replaceAll(".", " · ")}
+                                  {typeof event.payload.summary === "string"
+                                    ? ` — ${event.payload.summary}`
+                                    : null}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {canReassign(task.state) ? (
                       <label className="mt-2 flex items-center gap-2 text-sm">
                         Zone
