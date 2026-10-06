@@ -76,6 +76,8 @@ export default function ProjectPage() {
   const usingFake = snapshot.runs.some((run) => run.provider === "fake");
   const spendTokens = project.spend_tokens ?? 0;
   const spendCeiling = project.spend_ceiling_tokens ?? 0;
+  const spendAlerts = project.spend_alerts ?? [];
+  const highestAlert = spendAlerts.length ? Math.max(...spendAlerts) : 0;
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
@@ -106,6 +108,7 @@ export default function ProjectPage() {
           ) : null}
           <p className="mt-2 text-sm text-muted">
             Spend: {spendTokens.toLocaleString()} / {spendCeiling.toLocaleString()} tokens
+            {highestAlert ? ` · alerted at ${spendAlerts.map((n) => `${n}%`).join(", ")}` : ""}
           </p>
           <div className="mt-4 flex flex-wrap items-end gap-3">
             {can("pause") ? (
@@ -169,6 +172,13 @@ export default function ProjectPage() {
               ? " and raise the spend ceiling if it was hit"
               : ""}
             .
+          </p>
+        ) : null}
+
+        {!project.paused && highestAlert >= 80 ? (
+          <p className="border border-oxide bg-oxide-soft px-4 py-3 text-sm">
+            Spend has crossed {highestAlert}% of the ceiling ({spendTokens.toLocaleString()} of{" "}
+            {spendCeiling.toLocaleString()} tokens). Raise the ceiling before the project is paused.
           </p>
         ) : null}
 

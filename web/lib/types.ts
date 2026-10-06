@@ -50,6 +50,7 @@ export type Snapshot = {
     paused: boolean;
     spend_ceiling_tokens?: number;
     spend_tokens?: number;
+    spend_alerts?: number[];
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];
