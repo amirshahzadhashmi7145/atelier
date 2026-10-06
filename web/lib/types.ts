@@ -144,3 +144,15 @@ export type ProjectListItem = {
   stage: string;
   created_at: string;
 };
+
+export type TaskDetail = {
+  task: Task;
+  runs: Snapshot["runs"];
+  checks: Snapshot["checks"];
+  findings: Snapshot["findings"];
+  defects: Snapshot["defects"];
+  pull_requests: Snapshot["pull_requests"];
+  events: Snapshot["events"];
+  diff: string | null;
+  diff_truncated: boolean;
+};

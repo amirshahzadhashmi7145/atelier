@@ -17,6 +17,7 @@ from app.schemas import (
     ProjectSnapshot,
     RequirementWrite,
     SpendCeilingUpdate,
+    TaskDetailOut,
     TaskReassign,
     UntestableSubmit,
 )
@@ -187,6 +188,15 @@ def get_executor(request: Request):
 @router.post("/projects/{project_id}/tasks/run", response_model=ProjectSnapshot)
 def run_next_task(project_id: str, service: ExecutionService = Depends(get_executor)) -> ProjectSnapshot:
     return service.run_next(project_id)
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}", response_model=TaskDetailOut)
+def get_task_detail(
+    project_id: str,
+    task_id: str,
+    service: ExecutionService = Depends(get_executor),
+) -> TaskDetailOut:
+    return service.task_detail(project_id, task_id)
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/review", response_model=ProjectSnapshot)
