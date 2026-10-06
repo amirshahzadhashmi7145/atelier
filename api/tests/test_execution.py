@@ -63,6 +63,33 @@ def _failure(body: dict) -> str:
     return event["payload"]["cause"]
 
 
+def test_a_person_can_reassign_a_ready_task_to_another_zone(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    snapshot = client.get(f"/api/projects/{project_id}").json()
+    first = _by_key(snapshot, "TASK-001")
+    assert first["zone"] == "backend"
+    assert first["state"] == "ready"
+    moved = client.post(
+        f"/api/projects/{project_id}/tasks/{first['id']}/reassign",
+        json={"zone": "frontend"},
+    )
+    assert moved.status_code == 200, moved.text
+    body = moved.json()
+    assert _by_key(body, "TASK-001")["zone"] == "frontend"
+    event = next(item for item in body["events"] if item["type"] == "task.reassigned")
+    assert event["payload"]["from_zone"] == "backend"
+    assert event["payload"]["to_zone"] == "frontend"
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    in_review = _by_key(ran.json(), "TASK-001")
+    refused = client.post(
+        f"/api/projects/{project_id}/tasks/{in_review['id']}/reassign",
+        json={"zone": "backend"},
+    )
+    assert refused.status_code == 409
+    assert "reassigned" in refused.json()["detail"].lower() or "cannot be reassigned" in refused.json()["detail"]
+
+
 def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)

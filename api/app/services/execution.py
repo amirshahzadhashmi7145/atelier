@@ -22,7 +22,8 @@ from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.gates import is_automatic
 from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
-from app.domain.task_machine import TaskState, transition
+from app.domain.task_machine import TaskState, require_reassignable, transition
+from app.domain.validation import ALLOWED_ZONES
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
@@ -327,6 +328,44 @@ class ExecutionService:
             payload={
                 "key": task.key,
                 "summary": "A person returned the escalated task to ready.",
+            },
+        )
+        return self.planning.snapshot(project.id)
+
+    def reassign(self, project_id: str, task_id: str, zone: str) -> ProjectSnapshot:
+        """A person moves a waiting task to another ownership zone."""
+
+        project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        task = self._task(project, task_id)
+        require_reassignable(task.state)
+        next_zone = zone.strip()
+        if next_zone not in ALLOWED_ZONES:
+            raise DomainError(
+                f"Zone '{next_zone}' is not assignable. "
+                "Use backend, frontend, or ai_engineer.",
+                status_code=422,
+            )
+        known_zones = {rule.zone for rule in project.ownership}
+        if next_zone not in known_zones:
+            raise DomainError(
+                f"Zone '{next_zone}' is not in this project's ownership map.",
+                status_code=422,
+            )
+        if next_zone == task.zone:
+            return self.planning.snapshot(project.id)
+        previous = task.zone
+        task.zone = next_zone
+        self.planning._event(
+            project,
+            "task.reassigned",
+            actor_kind="user",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "from_zone": previous,
+                "to_zone": next_zone,
+                "summary": f"{task.key} moved from {previous} to {next_zone}.",
             },
         )
         return self.planning.snapshot(project.id)

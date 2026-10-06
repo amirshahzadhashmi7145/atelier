@@ -58,6 +58,10 @@ class UntestableSubmit(BaseModel):
     decision: Literal["waive", "reject"]
 
 
+class TaskReassign(BaseModel):
+    zone: Literal["backend", "frontend", "ai_engineer"]
+
+
 class CriterionOut(BaseModel):
     id: str
     key: str

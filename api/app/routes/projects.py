@@ -17,6 +17,7 @@ from app.schemas import (
     ProjectSnapshot,
     RequirementWrite,
     SpendCeilingUpdate,
+    TaskReassign,
     UntestableSubmit,
 )
 from app.services.planning import PlanningService
@@ -213,6 +214,16 @@ def resume_task(
     service: ExecutionService = Depends(get_executor),
 ) -> ProjectSnapshot:
     return service.resume(project_id, task_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/reassign", response_model=ProjectSnapshot)
+def reassign_task(
+    project_id: str,
+    task_id: str,
+    body: TaskReassign,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.reassign(project_id, task_id, body.zone)
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/untestable", response_model=ProjectSnapshot)

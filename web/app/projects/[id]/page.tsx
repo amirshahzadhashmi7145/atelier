@@ -717,6 +717,30 @@ export default function ProjectPage() {
                       {task.depends_on.length ? ` · waits on ${task.depends_on.join(", ")}` : " · nothing blocks it"}
                       {task.branch_name ? ` · ${task.branch_name}` : ""}
                     </p>
+                    {canReassign(task.state) ? (
+                      <label className="mt-2 flex items-center gap-2 text-sm">
+                        Zone
+                        <select
+                          disabled={busy || project.paused}
+                          value={task.zone}
+                          className="border border-line bg-paper px-2 py-1"
+                          onChange={(event) =>
+                            void run(() =>
+                              api(`/api/projects/${project.id}/tasks/${task.id}/reassign`, {
+                                method: "POST",
+                                body: JSON.stringify({ zone: event.target.value }),
+                              }),
+                            )
+                          }
+                        >
+                          {[...new Set(snapshot.ownership.map((rule) => rule.zone))].map((zone) => (
+                            <option key={zone} value={zone}>
+                              {zone}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     {task.state === "escalated" ? (
                       <button
                         type="button"
@@ -877,6 +901,16 @@ function taskPriority(state: string): number {
   if (state === "in_progress") return 4;
   if (state === "blocked") return 5;
   return 6;
+}
+
+function canReassign(state: string): boolean {
+  return (
+    state === "ready" ||
+    state === "blocked" ||
+    state === "escalated" ||
+    state === "failed" ||
+    state === "changes_requested"
+  );
 }
 
 function GateButtons({

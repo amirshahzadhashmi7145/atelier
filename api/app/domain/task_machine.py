@@ -48,6 +48,30 @@ def place(blocked: bool) -> TaskState:
     return TaskState.BLOCKED if blocked else TaskState.READY
 
 
+# A person may move a task to another zone only while no agent holds it.
+_REASSIGNABLE = {
+    TaskState.BLOCKED,
+    TaskState.READY,
+    TaskState.CHANGES_REQUESTED,
+    TaskState.FAILED,
+    TaskState.ESCALATED,
+}
+
+
+def can_reassign(state: TaskState | str) -> bool:
+    current = state if isinstance(state, TaskState) else TaskState(state)
+    return current in _REASSIGNABLE
+
+
+def require_reassignable(state: TaskState | str) -> None:
+    if not can_reassign(state):
+        current = state if isinstance(state, TaskState) else TaskState(state)
+        raise DomainError(
+            f"A task in {current.value} cannot be reassigned. "
+            "Wait until it is ready, blocked, escalated, or sent back."
+        )
+
+
 def transition(
     state: TaskState,
     target: TaskState,
