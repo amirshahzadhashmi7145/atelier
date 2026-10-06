@@ -65,8 +65,10 @@ class _Write(BaseModel):
 
 
 class _Implement(BaseModel):
-    summary: str = Field(min_length=1)
+    summary: str = ""
     done: bool = False
+    needs_clarification: bool = False
+    clarification: str = ""
     writes: list[_Write] = []
 
 
@@ -698,6 +700,12 @@ class ExecutionService:
             )
             self._note_tokens(budget, result.input_tokens + result.output_tokens)
             parsed = self._parse(result.data)
+            if parsed.needs_clarification:
+                question = parsed.clarification.strip() or parsed.summary.strip()
+                if not question:
+                    question = "The task is under-specified."
+                self._escalate_for_clarification(project, task, question)
+                return
             signature = tuple(sorted((item.path, item.content) for item in parsed.writes))
             if signature == previous:
                 raise DomainError("The agent repeated the same change. The run was stopped.")
@@ -709,6 +717,8 @@ class ExecutionService:
             if not parsed.writes:
                 raise DomainError("The agent finished without writing a file.", status_code=422)
             summary = parsed.summary.strip()
+            if not summary:
+                raise DomainError("The agent finished without a summary.", status_code=422)
             writes = [(item.path, item.content) for item in parsed.writes]
             try:
                 workspace.apply(writes)
@@ -887,6 +897,24 @@ class ExecutionService:
                 "number": record.number,
                 "url": record.url,
                 "summary": draft.title,
+            },
+        )
+
+    def _escalate_for_clarification(self, project: Project, task: Task, question: str) -> None:
+        """Stop inventing: hand an under-specified task to a person (FR-DEV-9)."""
+
+        task.state, task.retry_count = self._move(task, TaskState.FAILED)
+        task.state, task.retry_count = self._move(task, TaskState.ESCALATED)
+        self.planning._event(
+            project,
+            "task.needs_clarification",
+            actor_kind="agent",
+            actor_role=task.zone,
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "summary": question,
+                "clarification": question,
             },
         )
 
