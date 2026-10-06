@@ -255,6 +255,7 @@ class ProjectOut(BaseModel):
     test_strategy: dict | None
     github_repo: str | None = None
     paused: bool = False
+    agents_revoked: bool = False
     spend_ceiling_tokens: int
     spend_tokens: int
     spend_alerts: list[int] = []

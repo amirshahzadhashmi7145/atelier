@@ -223,6 +223,26 @@ export default function ProjectPage() {
                 Unpause project
               </button>
             ) : null}
+            {can("revoke_agents") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="border border-oxide px-3 py-2 text-sm text-oxide"
+                onClick={() => run(() => api(`/api/projects/${project.id}/revoke-agents`, { method: "POST" }))}
+              >
+                Revoke agents
+              </button>
+            ) : null}
+            {can("restore_agents") ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="bg-moss px-3 py-2 text-sm text-white"
+                onClick={() => run(() => api(`/api/projects/${project.id}/restore-agents`, { method: "POST" }))}
+              >
+                Restore agents
+              </button>
+            ) : null}
             <label className="text-sm">
               Raise ceiling
               <span className="mt-1 flex gap-2">
@@ -264,6 +284,13 @@ export default function ProjectPage() {
               ? " and raise the spend ceiling if it was hit"
               : ""}
             .
+          </p>
+        ) : null}
+
+        {!project.paused && project.agents_revoked ? (
+          <p className="border border-oxide bg-oxide-soft px-4 py-3 text-sm">
+            Agent authority is revoked. You can still approve gates, amend branches, and edit the plan.
+            Restore agents when they should act again.
           </p>
         ) : null}
 

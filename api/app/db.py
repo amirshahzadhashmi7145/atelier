@@ -62,6 +62,8 @@ def align_schema(engine: Engine) -> None:
                 connection.execute(text("ALTER TABLE projects ADD COLUMN github_repo VARCHAR(200)"))
             if "paused" not in names:
                 connection.execute(text("ALTER TABLE projects ADD COLUMN paused BOOLEAN DEFAULT 0"))
+            if "agents_revoked" not in names:
+                connection.execute(text("ALTER TABLE projects ADD COLUMN agents_revoked BOOLEAN DEFAULT 0"))
             if "spend_ceiling_tokens" not in names:
                 connection.execute(
                     text("ALTER TABLE projects ADD COLUMN spend_ceiling_tokens INTEGER DEFAULT 1000000")

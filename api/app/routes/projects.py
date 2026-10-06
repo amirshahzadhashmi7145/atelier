@@ -82,6 +82,16 @@ def unpause_project(project_id: str, service: PlanningService = Depends(get_serv
     return service.unpause(project_id)
 
 
+@router.post("/projects/{project_id}/revoke-agents", response_model=ProjectSnapshot)
+def revoke_agents(project_id: str, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
+    return service.revoke_agents(project_id)
+
+
+@router.post("/projects/{project_id}/restore-agents", response_model=ProjectSnapshot)
+def restore_agents(project_id: str, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
+    return service.restore_agents(project_id)
+
+
 @router.post("/projects/{project_id}/spend-ceiling", response_model=ProjectSnapshot)
 def set_spend_ceiling(
     project_id: str,
