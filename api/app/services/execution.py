@@ -17,6 +17,7 @@ from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.control import require_active, require_agents
+from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.gates import is_automatic
@@ -117,6 +118,23 @@ class ExecutionService:
             workspace.start_branch(task.branch_name)
         except RuntimeError as exc:
             raise DomainError(f"The branch diff could not be read: {exc}") from exc
+        weakenings = weakened_tests(diff)
+        if weakenings:
+            self._send_back(
+                project,
+                task,
+                [
+                    (
+                        "tests/integrity",
+                        "Inspect the branch diff for deleted tests, removed assertions, or skips.",
+                        "; ".join(weakenings),
+                        "Existing tests stay, keep their assertions, and are not skipped.",
+                    )
+                ],
+                "The branch weakens existing tests. The task is ready for another attempt.",
+                event_type="qa.tests_weakened",
+            )
+            return self.planning.snapshot(project.id)
         sandbox = self._sandbox()
         checks = run_checks(
             workspace.root,
