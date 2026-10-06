@@ -386,6 +386,58 @@ def test_a_second_run_is_refused_while_one_is_in_progress(tmp_path: Path):
     assert "already in progress" in refused.json()["detail"]
 
 
+def test_a_stuck_in_progress_task_is_escalated_when_past_budget(tmp_path: Path):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import Event, Task
+
+    client = client_for(tmp_path, run_max_seconds=30)
+    project_id = _prepare(client)
+    task_id = _by_key(client.get(f"/api/projects/{project_id}").json(), "TASK-001")["id"]
+    session = client.app.state.session_factory()
+    try:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.state = "in_progress"
+        session.add(
+            Event(
+                id="evt_stall_claim",
+                project_id=project_id,
+                type="task.claimed",
+                task_id=task_id,
+                actor_kind="system",
+                payload={"key": "TASK-001"},
+                occurred_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    body = client.get(f"/api/projects/{project_id}").json()
+    assert _by_key(body, "TASK-001")["state"] == "escalated"
+    assert any(event["type"] == "task.stalled" for event in body["events"])
+    assert "resume_escalated" in body["project"]["next_actions"]
+
+
+def test_a_blocked_graph_with_no_ready_task_is_escalated(tmp_path: Path):
+    from sqlalchemy import select
+
+    from app.models import Task
+
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    session = client.app.state.session_factory()
+    try:
+        for task in session.scalars(select(Task).where(Task.project_id == project_id)).all():
+            task.state = "blocked"
+        session.commit()
+    finally:
+        session.close()
+    body = client.get(f"/api/projects/{project_id}").json()
+    assert all(task["state"] == "escalated" for task in body["tasks"])
+    assert any(event["type"] == "task.stalled" for event in body["events"])
+
+
 def test_an_escalated_task_can_be_resumed_by_a_person(tmp_path: Path):
     client = client_for(tmp_path, _OutsideZone())
     project_id = _prepare(client)

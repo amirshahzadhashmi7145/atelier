@@ -103,6 +103,8 @@ class ExecutionService:
         project = self.planning._project(project_id)
         require_active(paused=bool(project.paused))
         require_agents(agents_revoked=bool(project.agents_revoked))
+        self.planning._recover_stalls(project)
+        self.session.flush()
         self._guard_spend(project)
         if any(item.state == TaskState.IN_PROGRESS.value for item in project.tasks):
             raise DomainError(

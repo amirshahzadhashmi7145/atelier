@@ -52,6 +52,7 @@ _OUTCOMES = {
     "task.defect_resolved",
     "task.spend_overspend",
     "task.needs_clarification",
+    "task.stalled",
     "merge.rebase_failed",
     "merge.checks_failed",
     "project.spend_ceiling",
