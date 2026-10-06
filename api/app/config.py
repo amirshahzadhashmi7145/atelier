@@ -29,8 +29,19 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_api_url: str = "https://api.github.com"
     default_spend_ceiling_tokens: int = 1_000_000
+    spend_alert_thresholds: str = "50,80,95"
     workspaces_dir: str = "./workspaces"
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+    @property
+    def spend_alert_threshold_list(self) -> list[int]:
+        values: list[int] = []
+        for part in self.spend_alert_thresholds.split(","):
+            text = part.strip()
+            if not text:
+                continue
+            values.append(int(text))
+        return values

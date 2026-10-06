@@ -62,7 +62,7 @@ class ExecutionService:
         self.session = session
         self.llm = llm
         self.settings = settings
-        self.planning = PlanningService(session, llm)
+        self.planning = PlanningService(session, llm, settings)
 
     def run_next(self, project_id: str) -> ProjectSnapshot:
         project = self.planning._project(project_id)
@@ -652,6 +652,7 @@ class ExecutionService:
         purpose: str = "implement",
     ) -> None:
         actor = role or task.zone
+        before = tokens_used(project.runs)
         run = AgentRun(
             id=new_id("run"),
             project_id=project.id,
@@ -679,6 +680,8 @@ class ExecutionService:
                 output_tokens=output_tokens,
             )
         )
+        after = before + int(input_tokens) + int(output_tokens)
+        self.planning._alert_spend_thresholds(project, before=before, after=after)
 
     def _replace_checks(self, project: Project, task: Task, checks: list[CheckResult]) -> None:
         self.session.execute(delete(CheckRun).where(CheckRun.task_id == task.id))

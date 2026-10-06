@@ -102,6 +102,47 @@ def test_hitting_the_spend_ceiling_pauses_the_project():
     assert again.status_code == 200, again.text
 
 
+def test_crossing_spend_thresholds_alerts_once_per_level():
+    client = client_for()
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Alerts",
+            "description": "Watch spend thresholds fire as planning runs.",
+            "spend_ceiling_tokens": 100,
+        },
+    )
+    project_id = created.json()["project"]["id"]
+    first = client.post(f"/api/projects/{project_id}/interpret")
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["project"]["spend_tokens"] == 50
+    assert body["project"]["spend_alerts"] == [50]
+    threshold_events = [event for event in body["events"] if event["type"] == "project.spend_threshold"]
+    assert len(threshold_events) == 1
+    assert threshold_events[0]["payload"]["percent"] == 50
+    snapshot = client.get(f"/api/projects/{project_id}").json()
+    answers = [
+        {"id": item["id"], "answer": "Signed-in team members."}
+        for item in snapshot["clarifications"]
+        if item["status"] == "open"
+    ]
+    second = client.post(
+        f"/api/projects/{project_id}/clarifications",
+        json={"answers": answers, "proceed": False},
+    )
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["project"]["spend_tokens"] == 100
+    assert body["project"]["spend_alerts"] == [50, 80, 95]
+    percents = sorted(
+        event["payload"]["percent"]
+        for event in body["events"]
+        if event["type"] == "project.spend_threshold"
+    )
+    assert percents == [50, 80, 95]
+
+
 def test_happy_path_stops_at_a_task_graph():
     client = client_for()
     project_id = _create(client)

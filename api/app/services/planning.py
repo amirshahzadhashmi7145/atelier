@@ -15,10 +15,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents import pm
+from app.config import Settings
 from app.domain.control import require_active
 from app.domain.graph import require_acyclic
 from app.domain.plan_stage import PlanStage, next_actions, transition
-from app.domain.spend import require_spend_room, tokens_used
+from app.domain.spend import (
+    DEFAULT_ALERT_THRESHOLDS,
+    require_spend_room,
+    thresholds_crossed,
+    tokens_used,
+)
 from app.domain.task_machine import place
 from app.domain.validation import check_task_shape, require_criteria, uncovered_requirements
 from app.errors import DomainError
@@ -149,9 +155,10 @@ def _parse(model: type[BaseModel], data: dict) -> BaseModel:
 
 
 class PlanningService:
-    def __init__(self, session: Session, llm: LlmClient) -> None:
+    def __init__(self, session: Session, llm: LlmClient, settings: Settings | None = None) -> None:
         self.session = session
         self.llm = llm
+        self.settings = settings or Settings()
 
     def create_project(
         self,
@@ -292,6 +299,7 @@ class PlanningService:
                 paused=bool(project.paused),
                 spend_ceiling_tokens=project.spend_ceiling_tokens,
                 spend_tokens=tokens_used(project.runs),
+                spend_alerts=self._spend_alerts(project),
                 created_at=project.created_at,
                 next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
                 uncovered_requirement_keys=uncovered,
@@ -808,8 +816,53 @@ class PlanningService:
             self.session.commit()
         require_spend_room(spent=spent, ceiling=ceiling)
 
+    def _spend_alerts(self, project: Project) -> list[int]:
+        ceiling = project.spend_ceiling_tokens
+        seen: set[int] = set()
+        ordered: list[int] = []
+        for event in project.events:
+            if event.type != "project.spend_threshold":
+                continue
+            payload = event.payload or {}
+            if payload.get("spend_ceiling_tokens") != ceiling:
+                continue
+            percent = payload.get("percent")
+            if not isinstance(percent, int) or percent in seen:
+                continue
+            seen.add(percent)
+            ordered.append(percent)
+        return sorted(ordered)
+
+    def _alert_spend_thresholds(self, project: Project, *, before: int, after: int) -> None:
+        ceiling = project.spend_ceiling_tokens
+        already = set(self._spend_alerts(project))
+        for percent in thresholds_crossed(
+            before=before,
+            after=after,
+            ceiling=ceiling,
+            thresholds=self.settings.spend_alert_threshold_list or DEFAULT_ALERT_THRESHOLDS,
+        ):
+            if percent in already:
+                continue
+            self._event(
+                project,
+                "project.spend_threshold",
+                actor_kind="system",
+                payload={
+                    "percent": percent,
+                    "spend_tokens": after,
+                    "spend_ceiling_tokens": ceiling,
+                    "summary": (
+                        f"Spend reached {percent}% of the ceiling "
+                        f"({after} of {ceiling} tokens)."
+                    ),
+                },
+            )
+            already.add(percent)
+
     def _complete(self, project: Project, purpose: str, system: str, user: str) -> LlmResult:
         self._guard_spend(project)
+        before = tokens_used(project.runs)
         result = self.llm.complete_json(purpose=purpose, system=system, user=user)
         run = AgentRun(
             id=new_id("run"),
@@ -834,6 +887,8 @@ class PlanningService:
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
         )
+        after = before + int(result.input_tokens) + int(result.output_tokens)
+        self._alert_spend_thresholds(project, before=before, after=after)
         return result
 
     def _assume(self, project: Project, item: Clarification) -> None:

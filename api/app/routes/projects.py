@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api")
 def get_service(request: Request):
     session: Session = request.app.state.session_factory()
     try:
-        yield PlanningService(session, request.app.state.llm)
+        yield PlanningService(session, request.app.state.llm, request.app.state.settings)
         session.commit()
     except Exception:
         session.rollback()
