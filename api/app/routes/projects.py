@@ -164,6 +164,15 @@ def accept_task(
     return service.accept(project_id, task_id)
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/resume", response_model=ProjectSnapshot)
+def resume_task(
+    project_id: str,
+    task_id: str,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.resume(project_id, task_id)
+
+
 @router.post("/projects/{project_id}/tasks/{task_id}/untestable", response_model=ProjectSnapshot)
 def resolve_untestable(
     project_id: str,

@@ -67,7 +67,9 @@ def new_id(prefix: str) -> str:
 def _actions(stage: str, tasks: list) -> list[str]:
     actions = next_actions(PlanStage(stage))
     if any(task.state == "ready" for task in tasks):
-        return [*actions, "run_ready"]
+        actions = [*actions, "run_ready"]
+    if any(task.state == "escalated" for task in tasks):
+        actions = [*actions, "resume_escalated"]
     return actions
 
 

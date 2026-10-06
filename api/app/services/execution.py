@@ -272,6 +272,27 @@ class ExecutionService:
         self._unblock(project)
         return self.planning.snapshot(project.id)
 
+    def resume(self, project_id: str, task_id: str) -> ProjectSnapshot:
+        """A person returns an escalated task to the ready queue."""
+
+        project = self.planning._project(project_id)
+        task = self._task(project, task_id)
+        if task.state != TaskState.ESCALATED.value:
+            raise DomainError("Only an escalated task can be resumed.")
+        task.state, task.retry_count = self._move(task, TaskState.READY)
+        task.retry_count = 0
+        self.planning._event(
+            project,
+            "task.resumed",
+            actor_kind="user",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "summary": "A person returned the escalated task to ready.",
+            },
+        )
+        return self.planning.snapshot(project.id)
+
     def resolve_untestable(self, project_id: str, task_id: str, decision: str) -> ProjectSnapshot:
         """A person settles criteria the review could not execute."""
 
