@@ -438,6 +438,37 @@ def test_a_failed_review_sends_the_task_back_with_a_defect(tmp_path: Path):
     assert _by_key(passed.json(), "TASK-001")["state"] == "gated"
 
 
+def test_review_rejects_a_branch_that_weakens_tests(tmp_path: Path):
+    from app.services.workspace import Workspace
+
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    workspace = Workspace(tmp_path / project_id)
+    workspace.ensure()
+    workspace._git("checkout", "main")
+    workspace.commit(
+        "MAIN",
+        "baseline test",
+        [("tests/test_app.py", "def test_ok():\n    assert True\n")],
+    )
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    workspace.start_branch("task/TASK-001")
+    workspace.commit(
+        "TASK-001",
+        "drop the assertion",
+        [("tests/test_app.py", "def test_ok():\n    pass\n")],
+        role="backend",
+        run_id="run_test_weaken",
+    )
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    body = reviewed.json()
+    assert _by_key(body, "TASK-001")["state"] == "ready"
+    assert any(item["criterion_key"] == "tests/integrity" for item in body["defects"])
+    assert any(event["type"] == "qa.tests_weakened" for event in body["events"])
+
+
 def test_an_untestable_criterion_stays_in_review(tmp_path: Path):
     client = client_for(tmp_path, _Untestable())
     project_id = _prepare(client)
