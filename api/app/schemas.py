@@ -191,6 +191,7 @@ class ProjectOut(BaseModel):
     architecture_summary: str | None
     test_strategy: dict | None
     github_repo: str | None = None
+    paused: bool = False
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]
