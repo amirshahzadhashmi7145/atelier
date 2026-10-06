@@ -48,6 +48,7 @@ from app.schemas import (
     FindingOut,
     GateOut,
     OwnershipOut,
+    PullRequestOut,
     ProjectListItem,
     ProjectOut,
     ProjectSnapshot,
@@ -146,12 +147,23 @@ class PlanningService:
         self.session = session
         self.llm = llm
 
-    def create_project(self, *, name: str, description: str, tech_preferences: str | None) -> ProjectSnapshot:
+    def create_project(
+        self,
+        *,
+        name: str,
+        description: str,
+        tech_preferences: str | None,
+        github_repo: str | None = None,
+    ) -> ProjectSnapshot:
+        repo = (github_repo or "").strip() or None
+        if repo and (repo.count("/") != 1 or any(part.strip() == "" for part in repo.split("/"))):
+            raise DomainError("github_repo must look like owner/name.", status_code=422)
         project = Project(
             id=new_id("prj"),
             name=name.strip(),
             description=description.strip(),
             tech_preferences=(tech_preferences or "").strip() or None,
+            github_repo=repo,
             stage=PlanStage.INTAKE.value,
         )
         self.session.add(project)
@@ -214,6 +226,7 @@ class PlanningService:
                 max_rounds=project.max_rounds,
                 architecture_summary=project.architecture_summary,
                 test_strategy=project.test_strategy,
+                github_repo=project.github_repo,
                 created_at=project.created_at,
                 next_actions=_actions(project.stage, tasks),
                 uncovered_requirement_keys=uncovered,
@@ -293,6 +306,19 @@ class PlanningService:
                     excerpt=item.excerpt,
                 )
                 for item in sorted(project.checks, key=lambda item: item.tier)
+            ],
+            pull_requests=[
+                PullRequestOut(
+                    id=item.id,
+                    task_id=item.task_id,
+                    branch_name=item.branch_name,
+                    title=item.title,
+                    body=item.body,
+                    state=item.state,
+                    number=item.number,
+                    url=item.url,
+                )
+                for item in sorted(project.pull_requests, key=lambda item: item.created_at)
             ],
             gates=[
                 GateOut(

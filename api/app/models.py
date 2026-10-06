@@ -32,6 +32,7 @@ class Project(Base):
     max_rounds: Mapped[int] = mapped_column(Integer, default=3)
     architecture_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_strategy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    github_repo: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -45,6 +46,7 @@ class Project(Base):
     findings: Mapped[list["CriterionFinding"]] = relationship(cascade="all, delete-orphan")
     defects: Mapped[list["Defect"]] = relationship(cascade="all, delete-orphan")
     checks: Mapped[list["CheckRun"]] = relationship(cascade="all, delete-orphan")
+    pull_requests: Mapped[list["PullRequest"]] = relationship(cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(cascade="all, delete-orphan")
     gates: Mapped[list["GateDecision"]] = relationship(cascade="all, delete-orphan")
     runs: Mapped[list["AgentRun"]] = relationship(cascade="all, delete-orphan")
@@ -185,6 +187,21 @@ class CheckRun(Base):
     command: Mapped[str] = mapped_column(String(400))
     exit_code: Mapped[int] = mapped_column(Integer)
     excerpt: Mapped[str] = mapped_column(Text, default="")
+
+
+class PullRequest(Base):
+    __tablename__ = "pull_requests"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    branch_name: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(20), default="open")
+    number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AgentRun(Base):

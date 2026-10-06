@@ -45,6 +45,7 @@ def create_project(body: ProjectCreate, service: PlanningService = Depends(get_s
         name=body.name,
         description=body.description,
         tech_preferences=body.tech_preferences,
+        github_repo=body.github_repo,
     )
 
 
