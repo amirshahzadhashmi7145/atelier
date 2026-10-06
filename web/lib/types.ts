@@ -51,6 +51,8 @@ export type Snapshot = {
     spend_ceiling_tokens?: number;
     spend_tokens?: number;
     spend_alerts?: number[];
+    spend_by_role?: { role: string; tokens: number }[];
+    spend_by_task?: { task_id: string; task_key: string; tokens: number }[];
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];
@@ -121,6 +123,7 @@ export type Snapshot = {
     model: string;
     input_tokens: number;
     output_tokens: number;
+    task_id?: string | null;
   }[];
 };
 
