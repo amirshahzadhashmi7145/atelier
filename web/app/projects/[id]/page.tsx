@@ -26,12 +26,12 @@ const RAIL = [
   { label: "Tasks", hint: "Work, and what it waits on", match: (stage: string) => stage === "tasks_ready" },
 ];
 
-const GATE_LABELS: { key: string; label: string }[] = [
+const GATE_LABELS: { key: string; label: string; irreversible?: boolean }[] = [
   { key: "requirements", label: "Requirements" },
   { key: "architecture", label: "Architecture" },
-  { key: "merge", label: "Merge" },
-  { key: "deployment", label: "Deployment" },
-  { key: "external_side_effects", label: "External effects" },
+  { key: "merge", label: "Merge", irreversible: true },
+  { key: "deployment", label: "Deployment", irreversible: true },
+  { key: "external_side_effects", label: "External effects", irreversible: true },
   { key: "spend_increase", label: "Spend increase" },
 ];
 
@@ -45,6 +45,7 @@ export default function ProjectPage() {
   const [interpretation, setInterpretation] = useState("");
   const [editingRequirement, setEditingRequirement] = useState<string | null>(null);
   const [ceilingInput, setCeilingInput] = useState("");
+  const [gateAck, setGateAck] = useState("");
 
   async function refresh() {
     const next = await loadProject(params.id);
@@ -58,11 +59,13 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
-  async function run(action: () => Promise<Snapshot>) {
+  async function run(action: () => Promise<Snapshot>): Promise<Snapshot | null> {
     setBusy(true);
     setError("");
     try {
-      setSnapshot(await action());
+      const next = await action();
+      setSnapshot(next);
+      return next;
     } catch (err) {
       setError(err instanceof Error ? err.message : "That step failed.");
       try {
@@ -70,6 +73,7 @@ export default function ProjectPage() {
       } catch {
         // The error above is the one to show.
       }
+      return null;
     } finally {
       setBusy(false);
     }
@@ -229,26 +233,54 @@ export default function ProjectPage() {
         <section className="border border-line bg-white/70 p-5">
           <h2 className="font-serif text-2xl">Approval policy</h2>
           <p className="mt-1 text-sm text-muted">
-            Each gate is human or automatic. Merge and deployment stay human unless you change them.
+            Each gate is human or automatic. Merge, deployment, and external effects need a written
+            acknowledgement before they can run without a person.
           </p>
+          <label className="mt-4 block text-sm">
+            Acknowledgement for irreversible automation
+            <input
+              type="text"
+              value={gateAck}
+              onChange={(event) => setGateAck(event.target.value)}
+              placeholder="I accept unattended merges for this project."
+              className="mt-1 w-full border border-line bg-paper px-3 py-2"
+            />
+          </label>
           <ul className="mt-4 grid gap-3 sm:grid-cols-2">
             {GATE_LABELS.map((gate) => (
               <li key={gate.key} className="flex items-center justify-between gap-3 text-sm">
-                <span>{gate.label}</span>
+                <span>
+                  {gate.label}
+                  {gate.irreversible ? <span className="text-muted"> · irreversible</span> : null}
+                </span>
                 <select
                   disabled={busy || project.paused}
                   value={gatePolicy[gate.key] ?? "human"}
                   className="border border-line bg-paper px-2 py-1"
-                  onChange={(event) =>
-                    run(() =>
+                  onChange={(event) => {
+                    const nextMode = event.target.value;
+                    const needsAck =
+                      gate.irreversible &&
+                      nextMode === "automatic" &&
+                      (gatePolicy[gate.key] ?? "human") !== "automatic";
+                    if (needsAck && !gateAck.trim()) {
+                      setError(
+                        `Write an acknowledgement before setting ${gate.label.toLowerCase()} to automatic.`,
+                      );
+                      return;
+                    }
+                    void run(() =>
                       api(`/api/projects/${project.id}/gate-policy`, {
                         method: "POST",
                         body: JSON.stringify({
-                          gate_policy: { ...gatePolicy, [gate.key]: event.target.value },
+                          gate_policy: { ...gatePolicy, [gate.key]: nextMode },
+                          acknowledgement: needsAck ? gateAck.trim() : undefined,
                         }),
                       }),
-                    )
-                  }
+                    ).then((next) => {
+                      if (next && needsAck) setGateAck("");
+                    });
+                  }}
                 >
                   <option value="human">Human</option>
                   <option value="automatic">Automatic</option>

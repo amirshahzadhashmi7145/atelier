@@ -24,6 +24,7 @@ class SpendCeilingUpdate(BaseModel):
 
 class GatePolicyUpdate(BaseModel):
     gate_policy: dict[str, Literal["human", "automatic"]]
+    acknowledgement: str | None = None
 
 
 class InterpretationUpdate(BaseModel):
