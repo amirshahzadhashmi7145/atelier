@@ -163,6 +163,15 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert task_run["role"] == "backend"
     written = tmp_path / project_id / "server" / "app.py"
     assert "create_record" in written.read_text()
+    log = subprocess.run(
+        ["git", "log", "-1", "--format=%B", "task/TASK-001"],
+        cwd=tmp_path / project_id,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "Atelier-Agent: backend" in log
+    assert f"Atelier-Run: {task_run['id']}" in log
     pr = next(item for item in body["pull_requests"] if item["task_id"] == first["id"])
     assert pr["state"] == "open"
     assert pr["title"].startswith("TASK-001:")
