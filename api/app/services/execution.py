@@ -656,6 +656,7 @@ class ExecutionService:
         run = AgentRun(
             id=new_id("run"),
             project_id=project.id,
+            task_id=task.id,
             role=actor,
             purpose=purpose,
             status="succeeded",

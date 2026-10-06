@@ -22,6 +22,8 @@ from app.domain.plan_stage import PlanStage, next_actions, transition
 from app.domain.spend import (
     DEFAULT_ALERT_THRESHOLDS,
     require_spend_room,
+    spend_by_role,
+    spend_by_task,
     thresholds_crossed,
     tokens_used,
 )
@@ -63,6 +65,8 @@ from app.schemas import (
     RequirementOut,
     RequirementWrite,
     RunOut,
+    SpendByRoleOut,
+    SpendByTaskOut,
     StoryOut,
     TaskOut,
 )
@@ -300,6 +304,17 @@ class PlanningService:
                 spend_ceiling_tokens=project.spend_ceiling_tokens,
                 spend_tokens=tokens_used(project.runs),
                 spend_alerts=self._spend_alerts(project),
+                spend_by_role=[
+                    SpendByRoleOut(role=role, tokens=tokens)
+                    for role, tokens in spend_by_role(project.runs)
+                ],
+                spend_by_task=[
+                    SpendByTaskOut(task_id=task_id, task_key=task_key, tokens=tokens)
+                    for task_id, task_key, tokens in spend_by_task(
+                        project.runs,
+                        {task.id: task.key for task in tasks},
+                    )
+                ],
                 created_at=project.created_at,
                 next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
                 uncovered_requirement_keys=uncovered,
@@ -425,6 +440,7 @@ class PlanningService:
                     model=item.model,
                     input_tokens=item.input_tokens,
                     output_tokens=item.output_tokens,
+                    task_id=item.task_id,
                 )
                 for item in sorted(project.runs, key=lambda item: item.created_at, reverse=True)
             ],
