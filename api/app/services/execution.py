@@ -104,6 +104,11 @@ class ExecutionService:
         require_active(paused=bool(project.paused))
         require_agents(agents_revoked=bool(project.agents_revoked))
         self._guard_spend(project)
+        if any(item.state == TaskState.IN_PROGRESS.value for item in project.tasks):
+            raise DomainError(
+                "Another agent run is already in progress on this project. "
+                "Cancel it or wait for it to finish."
+            )
         task = self._claim(project)
         try:
             self._execute(project, task)

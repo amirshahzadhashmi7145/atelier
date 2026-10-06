@@ -367,6 +367,25 @@ def test_a_person_can_cancel_a_stuck_in_progress_task(tmp_path: Path):
     assert _by_key(cancelled.json(), "TASK-001")["state"] == "cancelled"
 
 
+def test_a_second_run_is_refused_while_one_is_in_progress(tmp_path: Path):
+    from app.models import Task
+
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    task_id = _by_key(client.get(f"/api/projects/{project_id}").json(), "TASK-001")["id"]
+    session = client.app.state.session_factory()
+    try:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.state = "in_progress"
+        session.commit()
+    finally:
+        session.close()
+    refused = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert refused.status_code == 409
+    assert "already in progress" in refused.json()["detail"]
+
+
 def test_an_escalated_task_can_be_resumed_by_a_person(tmp_path: Path):
     client = client_for(tmp_path, _OutsideZone())
     project_id = _prepare(client)
