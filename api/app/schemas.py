@@ -15,6 +15,11 @@ class ProjectCreate(BaseModel):
     description: str = Field(min_length=1)
     tech_preferences: str | None = None
     github_repo: str | None = None
+    spend_ceiling_tokens: int | None = Field(default=None, ge=1)
+
+
+class SpendCeilingUpdate(BaseModel):
+    spend_ceiling_tokens: int = Field(ge=1)
 
 
 class InterpretationUpdate(BaseModel):
@@ -192,6 +197,8 @@ class ProjectOut(BaseModel):
     test_strategy: dict | None
     github_repo: str | None = None
     paused: bool = False
+    spend_ceiling_tokens: int
+    spend_tokens: int
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]

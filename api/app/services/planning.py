@@ -18,6 +18,7 @@ from app.agents import pm
 from app.domain.control import require_active
 from app.domain.graph import require_acyclic
 from app.domain.plan_stage import PlanStage, next_actions, transition
+from app.domain.spend import require_spend_room, tokens_used
 from app.domain.task_machine import place
 from app.domain.validation import check_task_shape, require_criteria, uncovered_requirements
 from app.errors import DomainError
@@ -159,16 +160,20 @@ class PlanningService:
         description: str,
         tech_preferences: str | None,
         github_repo: str | None = None,
+        spend_ceiling_tokens: int = 1_000_000,
     ) -> ProjectSnapshot:
         repo = (github_repo or "").strip() or None
         if repo and (repo.count("/") != 1 or any(part.strip() == "" for part in repo.split("/"))):
             raise DomainError("github_repo must look like owner/name.", status_code=422)
+        if spend_ceiling_tokens < 1:
+            raise DomainError("The spend ceiling must be at least 1 token.", status_code=422)
         project = Project(
             id=new_id("prj"),
             name=name.strip(),
             description=description.strip(),
             tech_preferences=(tech_preferences or "").strip() or None,
             github_repo=repo,
+            spend_ceiling_tokens=spend_ceiling_tokens,
             stage=PlanStage.INTAKE.value,
         )
         self.session.add(project)
@@ -201,6 +206,30 @@ class PlanningService:
             "project.unpaused",
             actor_kind="user",
             payload={"summary": "A person unpaused the project."},
+        )
+        return self.snapshot(project_id)
+
+    def set_spend_ceiling(self, project_id: str, spend_ceiling_tokens: int) -> ProjectSnapshot:
+        project = self._project(project_id)
+        if spend_ceiling_tokens < 1:
+            raise DomainError("The spend ceiling must be at least 1 token.", status_code=422)
+        spent = tokens_used(project.runs)
+        if spend_ceiling_tokens < spent:
+            raise DomainError(
+                f"The ceiling cannot be below spend already used ({spent} tokens).",
+                status_code=422,
+            )
+        project.spend_ceiling_tokens = spend_ceiling_tokens
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.spend_ceiling_raised",
+            actor_kind="user",
+            payload={
+                "spend_ceiling_tokens": spend_ceiling_tokens,
+                "spend_tokens": spent,
+                "summary": f"Spend ceiling set to {spend_ceiling_tokens} tokens.",
+            },
         )
         return self.snapshot(project_id)
 
@@ -261,6 +290,8 @@ class PlanningService:
                 test_strategy=project.test_strategy,
                 github_repo=project.github_repo,
                 paused=bool(project.paused),
+                spend_ceiling_tokens=project.spend_ceiling_tokens,
+                spend_tokens=tokens_used(project.runs),
                 created_at=project.created_at,
                 next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
                 uncovered_requirement_keys=uncovered,
@@ -441,6 +472,7 @@ class PlanningService:
     ) -> ProjectSnapshot:
         project = self._project(project_id)
         require_active(paused=bool(project.paused))
+        self._guard_spend(project)
         self._require_stage(project, {PlanStage.CLARIFYING})
         by_id = {item_id: text for item_id, text in answers}
         open_items = [item for item in project.clarifications if item.status == "open"]
@@ -754,7 +786,30 @@ class PlanningService:
             project.updated_at = utcnow()
         return self.snapshot(project.id)
 
+    def _guard_spend(self, project: Project) -> None:
+        spent = tokens_used(project.runs)
+        ceiling = project.spend_ceiling_tokens
+        if spent < ceiling:
+            return
+        if not project.paused:
+            project.paused = True
+            project.updated_at = utcnow()
+            self._event(
+                project,
+                "project.spend_ceiling",
+                actor_kind="system",
+                payload={
+                    "spend_tokens": spent,
+                    "spend_ceiling_tokens": ceiling,
+                    "summary": f"Spend reached {spent} of {ceiling} tokens. The project was paused.",
+                },
+            )
+            # Persist the pause even though the refused step will roll back.
+            self.session.commit()
+        require_spend_room(spent=spent, ceiling=ceiling)
+
     def _complete(self, project: Project, purpose: str, system: str, user: str) -> LlmResult:
+        self._guard_spend(project)
         result = self.llm.complete_json(purpose=purpose, system=system, user=user)
         run = AgentRun(
             id=new_id("run"),
