@@ -55,6 +55,8 @@ def align_schema(engine: Engine) -> None:
                 connection.execute(text("ALTER TABLE tasks ADD COLUMN branch_name VARCHAR(200)"))
             if "estimate_tokens" not in names:
                 connection.execute(text("ALTER TABLE tasks ADD COLUMN estimate_tokens INTEGER DEFAULT 0"))
+            if "source_task_id" not in names:
+                connection.execute(text("ALTER TABLE tasks ADD COLUMN source_task_id VARCHAR(40)"))
     if inspector.has_table("projects"):
         names = {column["name"] for column in inspector.get_columns("projects")}
         with engine.begin() as connection:

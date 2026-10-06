@@ -795,6 +795,7 @@ export default function ProjectPage() {
                       Covers {task.requirement_keys.join(", ")}
                       {task.depends_on.length ? ` · waits on ${task.depends_on.join(", ")}` : " · nothing blocks it"}
                       {task.branch_name ? ` · ${task.branch_name}` : ""}
+                      {task.source_task_key ? ` · fixes ${task.source_task_key}` : ""}
                     </p>
                     <button
                       type="button"

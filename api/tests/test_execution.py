@@ -415,6 +415,11 @@ def test_a_failed_review_sends_the_task_back_with_a_defect(tmp_path: Path):
     assert _by_key(body, "TASK-001")["state"] == "ready"
     assert body["defects"][0]["expected"] == "401"
     assert body["defects"][0]["observed"] == "201"
+    fix = next(item for item in body["tasks"] if item.get("source_task_key") == "TASK-001")
+    assert fix["zone"] == "backend"
+    assert fix["state"] == "ready"
+    assert "Fix defects from TASK-001" in fix["title"]
+    assert any(event["type"] == "task.defect_routed" for event in body["events"])
     log = subprocess.run(
         ["git", "log", "main", "--oneline"],
         cwd=tmp_path / project_id,
@@ -427,6 +432,7 @@ def test_a_failed_review_sends_the_task_back_with_a_defect(tmp_path: Path):
     again = client.post(f"/api/projects/{project_id}/tasks/run")
     assert again.status_code == 200, again.text
     assert _by_key(again.json(), "TASK-001")["state"] == "in_review"
+    assert _by_key(again.json(), fix["key"])["state"] == "done"
     assert "revised after review" in (tmp_path / project_id / "server" / "app.py").read_text()
     passed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
     assert _by_key(passed.json(), "TASK-001")["state"] == "gated"

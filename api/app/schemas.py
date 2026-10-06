@@ -131,6 +131,7 @@ class TaskOut(BaseModel):
     retry_count: int
     max_retries: int
     branch_name: str | None = None
+    source_task_key: str | None = None
 
 
 class FindingOut(BaseModel):

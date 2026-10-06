@@ -32,6 +32,7 @@ export type Task = {
   retry_count: number;
   max_retries: number;
   branch_name: string | null;
+  source_task_key?: string | null;
 };
 
 export type Snapshot = {
