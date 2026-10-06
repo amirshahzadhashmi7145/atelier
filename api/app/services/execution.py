@@ -19,13 +19,24 @@ from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.control import require_active
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
+from app.domain.gates import is_automatic
 from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
 from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
-from app.models import AgentRun, CheckRun, CriterionFinding, Defect, Event, Project, PullRequest, Task
+from app.models import (
+    AgentRun,
+    CheckRun,
+    CriterionFinding,
+    Defect,
+    Event,
+    GateDecision,
+    Project,
+    PullRequest,
+    Task,
+)
 from app.services.checks import CheckResult, SandboxOptions, run_checks
 from app.services import github as github_api
 from app.schemas import ProjectSnapshot
@@ -173,6 +184,8 @@ class ExecutionService:
                 task_id=task.id,
                 payload={"key": task.key, "summary": "Every criterion passed."},
             )
+            if is_automatic(project.gate_policy, "merge"):
+                return self.accept(project_id, task_id, actor_kind="system")
         elif verdict == "fail":
             failed = [item for item in findings if item.result == "fail"]
             self._send_back(
@@ -204,7 +217,7 @@ class ExecutionService:
             )
         return self.planning.snapshot(project.id)
 
-    def accept(self, project_id: str, task_id: str) -> ProjectSnapshot:
+    def accept(self, project_id: str, task_id: str, *, actor_kind: str = "user") -> ProjectSnapshot:
         project = self.planning._project(project_id)
         require_active(paused=bool(project.paused))
         task = self._task(project, task_id)
@@ -269,10 +282,27 @@ class ExecutionService:
         for item in project.pull_requests:
             if item.task_id == task.id and item.state == "open":
                 item.state = "merged"
+        merge_note = "Approved by automatic policy." if actor_kind == "system" else None
+        self.session.add(
+            GateDecision(
+                id=new_id("gate"),
+                project_id=project.id,
+                gate="merge",
+                decision="approved",
+                note=merge_note,
+            )
+        )
+        self.planning._event(
+            project,
+            "gate.decided",
+            actor_kind=actor_kind,
+            task_id=task.id,
+            payload={"gate": "merge", "decision": "approved", "note": merge_note, "mode": actor_kind},
+        )
         self.planning._event(
             project,
             "task.accepted",
-            actor_kind="user",
+            actor_kind=actor_kind,
             task_id=task.id,
             payload={"key": task.key, "branch": task.branch_name},
         )

@@ -154,6 +154,40 @@ def test_crossing_spend_thresholds_alerts_once_per_level():
     assert percents == [50, 80, 95]
 
 
+def test_projects_start_with_human_gate_policy():
+    client = client_for()
+    project_id = _create(client)
+    body = client.get(f"/api/projects/{project_id}").json()
+    assert body["project"]["gate_policy"]["requirements"] == "human"
+    assert body["project"]["gate_policy"]["merge"] == "human"
+    assert body["project"]["gate_policy"]["deployment"] == "human"
+
+
+def test_automatic_requirements_gate_approves_without_a_person():
+    client = client_for()
+    project_id = _create(client)
+    policy = client.post(
+        f"/api/projects/{project_id}/gate-policy",
+        json={"gate_policy": {"requirements": "automatic"}},
+    )
+    assert policy.status_code == 200, policy.text
+    assert policy.json()["project"]["gate_policy"]["requirements"] == "automatic"
+    client.post(f"/api/projects/{project_id}/interpret")
+    _answer_open(client, project_id)
+    drafted = client.post(f"/api/projects/{project_id}/requirements")
+    assert drafted.status_code == 200, drafted.text
+    body = drafted.json()
+    assert body["project"]["stage"] == "requirements_approved"
+    assert "approve_requirements" not in body["project"]["next_actions"]
+    gate = next(item for item in body["gates"] if item["gate"] == "requirements")
+    assert gate["decision"] == "approved"
+    assert gate["note"] == "Approved by automatic policy."
+    assert any(
+        event["type"] == "gate.decided" and event["actor_kind"] == "system"
+        for event in body["events"]
+    )
+
+
 def test_happy_path_stops_at_a_task_graph():
     client = client_for()
     project_id = _create(client)

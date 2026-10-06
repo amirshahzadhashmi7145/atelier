@@ -107,6 +107,31 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert "run_ready" in body["project"]["next_actions"]
     assert "create_record" in (tmp_path / project_id / "server" / "app.py").read_text()
     assert next(item for item in body["pull_requests"] if item["task_id"] == first["id"])["state"] == "merged"
+    assert any(item["gate"] == "merge" and item["decision"] == "approved" for item in body["gates"])
+
+
+def test_automatic_merge_gate_accepts_after_review(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    client.post(
+        f"/api/projects/{project_id}/gate-policy",
+        json={"gate_policy": {"merge": "automatic"}},
+    )
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    first = _by_key(ran.json(), "TASK-001")
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/review")
+    assert reviewed.status_code == 200, reviewed.text
+    body = reviewed.json()
+    assert _by_key(body, "TASK-001")["state"] == "done"
+    assert _by_key(body, "TASK-002")["state"] == "ready"
+    merge_gate = next(item for item in body["gates"] if item["gate"] == "merge")
+    assert merge_gate["note"] == "Approved by automatic policy."
+    assert any(
+        event["type"] == "gate.decided"
+        and event["payload"].get("gate") == "merge"
+        and event["actor_kind"] == "system"
+        for event in body["events"]
+    )
 
 
 def test_a_rebase_conflict_on_accept_sends_the_task_back(tmp_path: Path):
