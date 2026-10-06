@@ -53,6 +53,15 @@ def test_a_paused_project_blocks_planning_steps():
     assert interpreted.status_code == 200
 
 
+def test_snapshot_events_carry_an_action_kind():
+    client = client_for()
+    project_id = _create(client)
+    body = client.post(f"/api/projects/{project_id}/interpret").json()
+    kinds = {event["kind"] for event in body["events"]}
+    assert "tool" in kinds or "artefact" in kinds or "outcome" in kinds
+    assert all(event["kind"] in {"decision", "tool", "artefact", "outcome"} for event in body["events"])
+
+
 def test_revoking_agents_blocks_planning_but_allows_restore():
     client = client_for()
     project_id = _create(client)

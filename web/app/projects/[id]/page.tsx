@@ -873,13 +873,19 @@ export default function ProjectPage() {
                         </div>
                         {taskDetail.events.length ? (
                           <div>
-                            <p className="text-xs tracking-widest text-muted uppercase">Task events</p>
+                            <p className="text-xs tracking-widest text-muted uppercase">Task action log</p>
                             <ul className="mt-1 space-y-1 text-muted">
                               {taskDetail.events.slice(0, 12).map((event) => (
                                 <li key={event.id}>
+                                  <span className="uppercase tracking-widest text-xs">
+                                    {event.kind ?? "outcome"}
+                                  </span>
+                                  {" · "}
                                   {event.type.replaceAll(".", " · ")}
                                   {typeof event.payload.summary === "string"
-                                    ? ` — ${event.payload.summary}`
+                                    ? event.actor_kind === "agent"
+                                      ? ` — agent summary: ${event.payload.summary}`
+                                      : ` — ${event.payload.summary}`
                                     : null}
                                 </li>
                               ))}
@@ -1082,17 +1088,35 @@ export default function ProjectPage() {
         ) : null}
 
         <section>
-          <h2 className="font-serif text-2xl">What happened</h2>
-          <p className="mt-1 text-sm text-muted">An append-only log. The plan can be reconstructed from these events.</p>
+          <h2 className="font-serif text-2xl">Action log</h2>
+          <p className="mt-1 text-sm text-muted">
+            Decisions, tools, artefacts, and outcomes. Agent-authored summaries are labelled as such — not as
+            explanations of behaviour.
+          </p>
           <ol className="mt-4 space-y-2 text-sm">
             {snapshot.events.map((event) => (
-              <li key={event.id} className="grid grid-cols-[9rem_1fr] gap-3 border-t border-line py-2">
+              <li
+                key={event.id}
+                className="grid grid-cols-[5.5rem_5.5rem_1fr] gap-3 border-t border-line py-2"
+              >
                 <time className="text-muted">{new Date(event.occurred_at).toLocaleTimeString()}</time>
+                <span className="text-xs tracking-widest text-muted uppercase">
+                  {event.kind ?? "outcome"}
+                </span>
                 <span>
                   {event.type.replaceAll(".", " · ")}
                   <span className="text-muted"> · {event.actor_role ?? event.actor_kind}</span>
                   {typeof event.payload.cause === "string" ? ` — ${event.payload.cause}` : null}
-                  {typeof event.payload.summary === "string" ? ` — ${event.payload.summary}` : null}
+                  {typeof event.payload.summary === "string" ? (
+                    <>
+                      {" — "}
+                      {event.actor_kind === "agent" ? (
+                        <span className="text-muted">agent summary: {event.payload.summary}</span>
+                      ) : (
+                        event.payload.summary
+                      )}
+                    </>
+                  ) : null}
                 </span>
               </li>
             ))}

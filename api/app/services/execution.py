@@ -16,6 +16,7 @@ from app.agents.developer import implement_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
+from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
@@ -455,6 +456,7 @@ class ExecutionService:
             EventOut(
                 id=item.id,
                 type=item.type,
+                kind=action_kind(item.type),
                 actor_kind=item.actor_kind,
                 actor_role=item.actor_role,
                 payload=item.payload,

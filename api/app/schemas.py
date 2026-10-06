@@ -182,6 +182,7 @@ class GateOut(BaseModel):
 class EventOut(BaseModel):
     id: str
     type: str
+    kind: str = "outcome"
     actor_kind: str
     actor_role: str | None
     payload: dict

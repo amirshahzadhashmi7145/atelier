@@ -121,6 +121,7 @@ export type Snapshot = {
   events: {
     id: string;
     type: string;
+    kind?: "decision" | "tool" | "artefact" | "outcome";
     actor_kind: string;
     actor_role: string | null;
     payload: Record<string, unknown>;
