@@ -199,6 +199,7 @@ class ProjectOut(BaseModel):
     paused: bool = False
     spend_ceiling_tokens: int
     spend_tokens: int
+    spend_alerts: list[int] = []
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]
