@@ -163,6 +163,36 @@ def test_projects_start_with_human_gate_policy():
     assert body["project"]["gate_policy"]["deployment"] == "human"
 
 
+def test_project_status_summarises_tasks_and_open_gates():
+    client = client_for()
+    project_id = _create(client)
+    client.post(f"/api/projects/{project_id}/interpret")
+    _answer_open(client, project_id)
+    client.post(f"/api/projects/{project_id}/requirements")
+    draft = client.get(f"/api/projects/{project_id}").json()
+    assert "requirements" in draft["project"]["status"]["open_gates"]
+    assert "Requirements approval pending" in draft["project"]["status"]["needs_you"]
+    assert draft["project"]["status"]["agents"][0] == {"role": "pm", "state": "working"}
+    client.post(
+        f"/api/projects/{project_id}/gates",
+        json={"gate": "requirements", "decision": "approved"},
+    )
+    client.post(f"/api/projects/{project_id}/architecture")
+    client.post(
+        f"/api/projects/{project_id}/gates",
+        json={"gate": "architecture", "decision": "approved"},
+    )
+    tasks = client.post(f"/api/projects/{project_id}/tasks")
+    assert tasks.status_code == 200, tasks.text
+    body = tasks.json()
+    status = body["project"]["status"]
+    assert status["task_counts"]
+    assert sum(status["task_counts"].values()) == len(body["tasks"])
+    blocked = status["blocked"]
+    assert all("task_key" in item and "blocked_by" in item for item in blocked)
+    assert {"role", "state"} <= set(status["agents"][0])
+
+
 def test_automatic_merge_needs_an_acknowledgement():
     client = client_for()
     project_id = _create(client)

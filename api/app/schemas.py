@@ -201,6 +201,24 @@ class SpendByTaskOut(BaseModel):
     tokens: int
 
 
+class BlockedTaskOut(BaseModel):
+    task_key: str
+    blocked_by: list[str]
+
+
+class AgentStatusOut(BaseModel):
+    role: str
+    state: str
+
+
+class ProjectStatusOut(BaseModel):
+    task_counts: dict[str, int] = {}
+    blocked: list[BlockedTaskOut] = []
+    open_gates: list[str] = []
+    agents: list[AgentStatusOut] = []
+    needs_you: list[str] = []
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str
@@ -223,6 +241,7 @@ class ProjectOut(BaseModel):
     estimate_tokens: int = 0
     spend_over_estimate: bool = False
     gate_policy: dict[str, str] = {}
+    status: ProjectStatusOut = ProjectStatusOut()
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]
