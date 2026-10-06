@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import pm
 from app.config import Settings
+from app.domain.actions import action_kind
 from app.domain.control import filter_actions, require_active, require_agents
 from app.domain.gates import (
     DEFAULT_GATE_POLICY,
@@ -546,6 +547,7 @@ class PlanningService:
                 EventOut(
                     id=item.id,
                     type=item.type,
+                    kind=action_kind(item.type),
                     actor_kind=item.actor_kind,
                     actor_role=item.actor_role,
                     payload=item.payload,
