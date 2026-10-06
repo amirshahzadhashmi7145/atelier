@@ -1,11 +1,26 @@
-from app.domain.spend import require_spend_room, thresholds_crossed, tokens_used
+from app.domain.spend import (
+    require_spend_room,
+    spend_by_role,
+    spend_by_task,
+    thresholds_crossed,
+    tokens_used,
+)
 from app.errors import DomainError
 
 
 class _Run:
-    def __init__(self, input_tokens: int, output_tokens: int) -> None:
+    def __init__(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        *,
+        role: str = "pm",
+        task_id: str | None = None,
+    ) -> None:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.role = role
+        self.task_id = task_id
 
 
 def test_tokens_used_sums_runs():
@@ -41,3 +56,25 @@ def test_thresholds_respect_custom_list():
         ceiling=100,
         thresholds=(25, 60),
     ) == [25, 60]
+
+
+def test_spend_by_role_groups_tokens():
+    assert spend_by_role(
+        [
+            _Run(10, 0, role="pm"),
+            _Run(5, 5, role="backend"),
+            _Run(20, 0, role="pm"),
+        ]
+    ) == [("pm", 30), ("backend", 10)]
+
+
+def test_spend_by_task_skips_planning_runs():
+    assert spend_by_task(
+        [
+            _Run(10, 0, role="pm", task_id=None),
+            _Run(4, 1, role="backend", task_id="tsk_a"),
+            _Run(2, 0, role="qa", task_id="tsk_a"),
+            _Run(8, 0, role="frontend", task_id="tsk_b"),
+        ],
+        {"tsk_a": "TASK-001", "tsk_b": "TASK-002"},
+    ) == [("tsk_b", "TASK-002", 8), ("tsk_a", "TASK-001", 7)]

@@ -64,3 +64,8 @@ def align_schema(engine: Engine) -> None:
                 connection.execute(
                     text("ALTER TABLE projects ADD COLUMN spend_ceiling_tokens INTEGER DEFAULT 1000000")
                 )
+    if inspector.has_table("agent_runs"):
+        names = {column["name"] for column in inspector.get_columns("agent_runs")}
+        if "task_id" not in names:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE agent_runs ADD COLUMN task_id VARCHAR(40)"))
