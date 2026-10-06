@@ -15,6 +15,7 @@ from app.schemas import (
     ProjectListItem,
     ProjectSnapshot,
     RequirementWrite,
+    SpendCeilingUpdate,
     UntestableSubmit,
 )
 from app.services.planning import PlanningService
@@ -40,12 +41,20 @@ def health() -> dict:
 
 
 @router.post("/projects", response_model=ProjectSnapshot)
-def create_project(body: ProjectCreate, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
+def create_project(
+    body: ProjectCreate,
+    request: Request,
+    service: PlanningService = Depends(get_service),
+) -> ProjectSnapshot:
+    ceiling = body.spend_ceiling_tokens
+    if ceiling is None:
+        ceiling = request.app.state.settings.default_spend_ceiling_tokens
     return service.create_project(
         name=body.name,
         description=body.description,
         tech_preferences=body.tech_preferences,
         github_repo=body.github_repo,
+        spend_ceiling_tokens=ceiling,
     )
 
 
@@ -67,6 +76,15 @@ def pause_project(project_id: str, service: PlanningService = Depends(get_servic
 @router.post("/projects/{project_id}/unpause", response_model=ProjectSnapshot)
 def unpause_project(project_id: str, service: PlanningService = Depends(get_service)) -> ProjectSnapshot:
     return service.unpause(project_id)
+
+
+@router.post("/projects/{project_id}/spend-ceiling", response_model=ProjectSnapshot)
+def set_spend_ceiling(
+    project_id: str,
+    body: SpendCeilingUpdate,
+    service: PlanningService = Depends(get_service),
+) -> ProjectSnapshot:
+    return service.set_spend_ceiling(project_id, body.spend_ceiling_tokens)
 
 
 @router.patch("/projects/{project_id}/interpretation", response_model=ProjectSnapshot)

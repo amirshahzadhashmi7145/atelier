@@ -53,6 +53,55 @@ def test_a_paused_project_blocks_planning_steps():
     assert interpreted.status_code == 200
 
 
+def test_hitting_the_spend_ceiling_pauses_the_project():
+    client = client_for()
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Budget",
+            "description": "A tiny app so spend can be measured.",
+            "spend_ceiling_tokens": 40,
+        },
+    )
+    project_id = created.json()["project"]["id"]
+    assert created.json()["project"]["spend_ceiling_tokens"] == 40
+    first = client.post(f"/api/projects/{project_id}/interpret")
+    assert first.status_code == 200, first.text
+    assert first.json()["project"]["spend_tokens"] == 50
+    snapshot = client.get(f"/api/projects/{project_id}").json()
+    answers = [
+        {"id": item["id"], "answer": "Signed-in team members."}
+        for item in snapshot["clarifications"]
+        if item["status"] == "open"
+    ]
+    refused = client.post(
+        f"/api/projects/{project_id}/clarifications",
+        json={"answers": answers, "proceed": False},
+    )
+    assert refused.status_code == 409
+    assert "ceiling" in refused.json()["detail"].lower()
+    snapshot = client.get(f"/api/projects/{project_id}").json()
+    assert snapshot["project"]["paused"] is True
+    assert any(event["type"] == "project.spend_ceiling" for event in snapshot["events"])
+    raised = client.post(
+        f"/api/projects/{project_id}/spend-ceiling",
+        json={"spend_ceiling_tokens": 500},
+    )
+    assert raised.status_code == 200, raised.text
+    client.post(f"/api/projects/{project_id}/unpause")
+    snapshot = client.get(f"/api/projects/{project_id}").json()
+    answers = [
+        {"id": item["id"], "answer": "Signed-in team members."}
+        for item in snapshot["clarifications"]
+        if item["status"] == "open"
+    ]
+    again = client.post(
+        f"/api/projects/{project_id}/clarifications",
+        json={"answers": answers, "proceed": False},
+    )
+    assert again.status_code == 200, again.text
+
+
 def test_happy_path_stops_at_a_task_graph():
     client = client_for()
     project_id = _create(client)
