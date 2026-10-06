@@ -18,6 +18,7 @@ from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
+from app.domain.dependencies import dependency_files
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
@@ -830,6 +831,10 @@ class ExecutionService:
             return
         if not task.branch_name:
             raise DomainError("This task has no branch for a pull request.")
+        try:
+            branch_diff = workspace.diff(task.branch_name)
+        except RuntimeError:
+            branch_diff = ""
         draft = compose(
             task_key=task.key,
             title=task.title,
@@ -845,6 +850,7 @@ class ExecutionService:
                 for item in checks
             ],
             assumptions=[item.statement for item in project.assumptions],
+            dependencies=dependency_files(branch_diff),
         )
         record = PullRequest(
             id=new_id("pr"),

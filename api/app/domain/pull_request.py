@@ -30,6 +30,7 @@ def compose(
     requirement_keys: list[str],
     checks: list[CheckLine],
     assumptions: list[str],
+    dependencies: list[str] | None = None,
 ) -> PullRequestDraft:
     reqs = ", ".join(requirement_keys) if requirement_keys else "(none)"
     check_lines = "\n".join(
@@ -38,11 +39,13 @@ def compose(
         for item in checks
     ) or "- (no checks recorded)"
     assumption_lines = "\n".join(f"- {item}" for item in assumptions) or "- (none recorded)"
+    dep_lines = "\n".join(f"- `{item}`" for item in (dependencies or [])) or "- (none)"
     body = (
         f"## Task\n{task_key}: {title}\n\n"
         f"## Requirements\n{reqs}\n\n"
         f"## Summary\n{summary.strip() or '(no summary)'}\n\n"
         f"## Test results\n{check_lines}\n\n"
+        f"## Dependencies\n{dep_lines}\n\n"
         f"## Assumptions\n{assumption_lines}\n"
     )
     return PullRequestDraft(title=f"{task_key}: {title}", body=body)

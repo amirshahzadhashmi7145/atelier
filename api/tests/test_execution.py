@@ -177,6 +177,7 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert pr["title"].startswith("TASK-001:")
     assert "FR-" in pr["body"]
     assert "Test results" in pr["body"]
+    assert "## Dependencies" in pr["body"]
     assert pr["url"] is None
 
     too_soon = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/accept")
