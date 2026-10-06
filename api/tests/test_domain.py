@@ -16,6 +16,17 @@ def test_new_task_is_ready_only_when_nothing_blocks_it():
     assert place(blocked=True) is TaskState.BLOCKED
 
 
+def test_a_gated_task_can_be_sent_back_after_a_failed_rebase():
+    state, retries = transition(
+        TaskState.GATED,
+        TaskState.CHANGES_REQUESTED,
+        retry_count=0,
+        max_retries=2,
+    )
+    assert state is TaskState.CHANGES_REQUESTED
+    assert retries == 0
+
+
 def test_retry_budget_forces_an_escalation():
     state, retries = transition(TaskState.FAILED, TaskState.READY, retry_count=0, max_retries=2)
     assert state is TaskState.READY

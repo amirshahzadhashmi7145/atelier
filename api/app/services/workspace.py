@@ -60,6 +60,37 @@ class Workspace:
     def diff(self, branch: str) -> str:
         return self._git("diff", f"main...{branch}")
 
+    def rebase_onto_main(self, branch: str) -> None:
+        """Replay the task branch on the current integration head.
+
+        On conflict the rebase is aborted and the branch is left as it was.
+        """
+
+        self._git("checkout", branch)
+        result = subprocess.run(
+            ["git", "rebase", "main"],
+            cwd=self.root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return
+        detail = (result.stderr or result.stdout).strip()
+        abort = subprocess.run(
+            ["git", "rebase", "--abort"],
+            cwd=self.root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if abort.returncode != 0 and "no rebase in progress" not in (abort.stderr or "").lower():
+            raise RuntimeError(
+                (abort.stderr or abort.stdout).strip()
+                or "The conflicted rebase could not be aborted."
+            )
+        raise RuntimeError(detail or f"git rebase main onto {branch} failed")
+
     def merge(self, branch: str, key: str) -> None:
         self._git("checkout", "main")
         self._git("merge", "--no-ff", branch, "-m", f"Accept {key}.")

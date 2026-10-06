@@ -36,7 +36,7 @@ _ALLOWED: dict[TaskState, set[TaskState]] = {
     TaskState.FAILED: {TaskState.READY, TaskState.ESCALATED},
     TaskState.ESCALATED: {TaskState.READY},
     TaskState.IN_REVIEW: {TaskState.GATED, TaskState.CHANGES_REQUESTED},
-    TaskState.GATED: {TaskState.DONE},
+    TaskState.GATED: {TaskState.DONE, TaskState.CHANGES_REQUESTED},
     TaskState.CHANGES_REQUESTED: {TaskState.READY},
     TaskState.DONE: set(),
 }
