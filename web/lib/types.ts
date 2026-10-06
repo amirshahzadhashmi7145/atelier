@@ -56,6 +56,7 @@ export type Snapshot = {
     spend_by_task?: { task_id: string; task_key: string; tokens: number }[];
     estimate_tokens?: number;
     spend_over_estimate?: boolean;
+    gate_policy?: Record<string, "human" | "automatic">;
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];
