@@ -205,8 +205,57 @@ class ExecutionService:
             raise DomainError("Only a task that passed review can be accepted.")
         if not task.branch_name:
             raise DomainError("This task has no branch to merge.")
+        workspace = Workspace(self._root(project))
         try:
-            Workspace(self._root(project)).merge(task.branch_name, task.key)
+            workspace.rebase_onto_main(task.branch_name)
+        except RuntimeError as exc:
+            self._send_back(
+                project,
+                task,
+                [
+                    (
+                        "merge/rebase",
+                        "git rebase main",
+                        (str(exc).strip() or "The rebase stopped with a conflict."),
+                        "The task branch rebases onto main cleanly.",
+                    )
+                ],
+                "The branch could not be rebased onto main. The task is ready for another attempt.",
+                event_type="merge.rebase_failed",
+                actor_kind="system",
+                actor_role=None,
+            )
+            return self.planning.snapshot(project.id)
+        checks = run_checks(
+            workspace.root,
+            project.test_strategy,
+            self.settings.check_timeout_seconds,
+            sandbox=self._sandbox(),
+        )
+        self._replace_checks(project, task, checks)
+        failed_checks = [item for item in checks if item.exit_code != 0]
+        if failed_checks:
+            self._send_back(
+                project,
+                task,
+                [
+                    (
+                        f"tests/{item.tier}",
+                        item.command,
+                        item.excerpt or f"The command exited {item.exit_code}.",
+                        "The command exits 0.",
+                    )
+                    for item in failed_checks
+                ],
+                "; ".join(f"{item.tier} exited {item.exit_code}" for item in failed_checks)
+                + ". Checks failed after rebase. The task is ready for another attempt.",
+                event_type="merge.checks_failed",
+                actor_kind="system",
+                actor_role=None,
+            )
+            return self.planning.snapshot(project.id)
+        try:
+            workspace.merge(task.branch_name, task.key)
         except RuntimeError as exc:
             raise DomainError(f"The branch could not be merged: {exc}") from exc
         task.state, task.retry_count = self._move(task, TaskState.DONE)

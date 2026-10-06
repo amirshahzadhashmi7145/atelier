@@ -21,3 +21,33 @@ def test_commit_happens_only_after_staging(tmp_path: Path):
     workspace.commit_staged("TASK-001", "add the app")
     log = workspace._git("log", "--oneline", "task/TASK-001")
     assert "TASK-001: add the app" in log
+
+
+def test_rebase_onto_main_replays_the_branch(tmp_path: Path):
+    workspace = Workspace(tmp_path)
+    workspace.ensure()
+    workspace.start_branch("task/TASK-001")
+    workspace.commit("TASK-001", "add the app", [("server/app.py", "print('branch')\n")])
+    workspace._git("checkout", "main")
+    workspace.commit("MAIN", "docs", [("server/readme.txt", "ok\n")])
+    workspace.rebase_onto_main("task/TASK-001")
+    assert (tmp_path / "server" / "app.py").read_text() == "print('branch')\n"
+    assert (tmp_path / "server" / "readme.txt").read_text() == "ok\n"
+
+
+def test_a_conflicted_rebase_is_aborted(tmp_path: Path):
+    workspace = Workspace(tmp_path)
+    workspace.ensure()
+    workspace.start_branch("task/TASK-001")
+    workspace.commit("TASK-001", "branch edit", [("server/app.py", "print('branch')\n")])
+    workspace._git("checkout", "main")
+    workspace.commit("MAIN", "main edit", [("server/app.py", "print('main')\n")])
+    try:
+        workspace.rebase_onto_main("task/TASK-001")
+    except RuntimeError as exc:
+        assert "conflict" in str(exc).lower() or "Could not apply" in str(exc) or str(exc)
+    else:
+        raise AssertionError("expected a conflict")
+    status = workspace._git("status")
+    assert "rebase in progress" not in status.lower()
+    assert (tmp_path / "server" / "app.py").read_text() == "print('branch')\n"

@@ -434,8 +434,8 @@ export default function ProjectPage() {
               and the architecture&apos;s test commands must pass in a container before that branch is
               committed and a pull request is opened. Review runs those commands again, then checks the
               acceptance criteria. A failing command sends the task back. A criterion the review cannot
-              execute waits for you to waive it or send the task back. Accepting a passed review merges it
-              and unblocks whatever was waiting.
+              execute waits for you to waive it or send the task back. Accepting a passed review rebases
+              onto main, re-runs the checks, then merges and unblocks whatever was waiting.
             </p>
             {can("run_ready") ? (
               <button

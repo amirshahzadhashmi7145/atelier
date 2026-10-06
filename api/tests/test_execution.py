@@ -102,6 +102,34 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert next(item for item in body["pull_requests"] if item["task_id"] == first["id"])["state"] == "merged"
 
 
+def test_a_rebase_conflict_on_accept_sends_the_task_back(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
+    assert _by_key(reviewed.json(), "TASK-001")["state"] == "gated"
+
+    root = tmp_path / project_id
+    subprocess.run(["git", "checkout", "main"], cwd=root, check=True, capture_output=True)
+    (root / "server" / "app.py").write_text("print('main wins')\n")
+    subprocess.run(["git", "add", "server/app.py"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Main changed the same file."],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+    accepted = client.post(f"/api/projects/{project_id}/tasks/{task_id}/accept")
+    assert accepted.status_code == 200, accepted.text
+    body = accepted.json()
+    assert _by_key(body, "TASK-001")["state"] == "ready"
+    assert any(item["criterion_key"] == "merge/rebase" for item in body["defects"])
+    assert any(event["type"] == "merge.rebase_failed" for event in body["events"])
+    assert _by_key(body, "TASK-002")["state"] == "blocked"
+
+
 def test_a_task_in_review_is_not_claimed_again(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)
