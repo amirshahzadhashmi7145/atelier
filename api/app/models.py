@@ -137,6 +137,7 @@ class Task(Base):
     zone: Mapped[str] = mapped_column(String(40))
     state: Mapped[str] = mapped_column(String(30))
     size: Mapped[str] = mapped_column(String(4))
+    estimate_tokens: Mapped[int] = mapped_column(Integer, default=0)
     requirement_keys: Mapped[list] = mapped_column(JSON)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=2)

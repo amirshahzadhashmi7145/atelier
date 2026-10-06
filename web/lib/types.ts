@@ -26,6 +26,7 @@ export type Task = {
   zone: string;
   state: string;
   size: string;
+  estimate_tokens?: number;
   requirement_keys: string[];
   depends_on: string[];
   retry_count: number;
@@ -53,6 +54,8 @@ export type Snapshot = {
     spend_alerts?: number[];
     spend_by_role?: { role: string; tokens: number }[];
     spend_by_task?: { task_id: string; task_key: string; tokens: number }[];
+    estimate_tokens?: number;
+    spend_over_estimate?: boolean;
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];

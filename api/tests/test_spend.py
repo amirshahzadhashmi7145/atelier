@@ -1,7 +1,10 @@
 from app.domain.spend import (
+    estimate_tokens_for_size,
     require_spend_room,
     spend_by_role,
     spend_by_task,
+    spend_diverges_from_estimate,
+    spend_exceeds_estimate,
     thresholds_crossed,
     tokens_used,
 )
@@ -78,3 +81,18 @@ def test_spend_by_task_skips_planning_runs():
         ],
         {"tsk_a": "TASK-001", "tsk_b": "TASK-002"},
     ) == [("tsk_b", "TASK-002", 8), ("tsk_a", "TASK-001", 7)]
+
+
+def test_estimate_tokens_follow_task_size():
+    assert estimate_tokens_for_size("S", s_tokens=2000, m_tokens=8000) == 2000
+    assert estimate_tokens_for_size("m", s_tokens=2000, m_tokens=8000) == 8000
+
+
+def test_spend_exceeds_estimate_uses_the_multiple():
+    assert spend_exceeds_estimate(spent=4001, estimate=2000, multiple=2.0) is True
+    assert spend_exceeds_estimate(spent=4000, estimate=2000, multiple=2.0) is False
+
+
+def test_spend_diverges_from_estimate_uses_the_margin():
+    assert spend_diverges_from_estimate(spent=3001, estimate=2000, margin=1.5) is True
+    assert spend_diverges_from_estimate(spent=3000, estimate=2000, margin=1.5) is False

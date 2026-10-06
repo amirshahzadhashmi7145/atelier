@@ -80,6 +80,8 @@ export default function ProjectPage() {
   const highestAlert = spendAlerts.length ? Math.max(...spendAlerts) : 0;
   const spendByRole = project.spend_by_role ?? [];
   const spendByTask = project.spend_by_task ?? [];
+  const estimateTokens = project.estimate_tokens ?? 0;
+  const spendOverEstimate = Boolean(project.spend_over_estimate);
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
@@ -110,6 +112,9 @@ export default function ProjectPage() {
           ) : null}
           <p className="mt-2 text-sm text-muted">
             Spend: {spendTokens.toLocaleString()} / {spendCeiling.toLocaleString()} tokens
+            {estimateTokens
+              ? ` · plan estimate ${estimateTokens.toLocaleString()}`
+              : ""}
             {highestAlert ? ` · alerted at ${spendAlerts.map((n) => `${n}%`).join(", ")}` : ""}
           </p>
           {spendByRole.length ? (
@@ -193,6 +198,13 @@ export default function ProjectPage() {
           <p className="border border-oxide bg-oxide-soft px-4 py-3 text-sm">
             Spend has crossed {highestAlert}% of the ceiling ({spendTokens.toLocaleString()} of{" "}
             {spendCeiling.toLocaleString()} tokens). Raise the ceiling before the project is paused.
+          </p>
+        ) : null}
+
+        {spendOverEstimate ? (
+          <p className="border border-oxide bg-oxide-soft px-4 py-3 text-sm">
+            Actual spend ({spendTokens.toLocaleString()} tokens) has diverged past the plan estimate (
+            {estimateTokens.toLocaleString()} tokens).
           </p>
         ) : null}
 
@@ -573,6 +585,9 @@ export default function ProjectPage() {
                   <div>
                     <p className="text-xs tracking-widest text-muted uppercase">
                       {task.key} · {task.state.replaceAll("_", " ")} · {task.zone} · size {task.size}
+                      {task.estimate_tokens
+                        ? ` · ~${task.estimate_tokens.toLocaleString()} tokens`
+                        : ""}
                     </p>
                     <h3 className="font-serif text-xl">{task.title}</h3>
                     <p className="text-sm">{task.description}</p>

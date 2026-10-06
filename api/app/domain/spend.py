@@ -46,6 +46,31 @@ def spend_by_task(runs: list, task_keys: Mapping[str, str]) -> list[tuple[str, s
     return sorted(rows, key=lambda item: (-item[2], item[1], item[0]))
 
 
+def estimate_tokens_for_size(size: str, *, s_tokens: int, m_tokens: int) -> int:
+    key = size.strip().upper()
+    if key == "S":
+        return int(s_tokens)
+    if key == "M":
+        return int(m_tokens)
+    raise DomainError(f"Task size must be S or M, not {size!r}.", status_code=422)
+
+
+def spend_exceeds_estimate(*, spent: int, estimate: int, multiple: float) -> bool:
+    """True when spent is strictly greater than estimate × multiple."""
+
+    if estimate < 1 or multiple <= 0:
+        return False
+    return spent > estimate * multiple
+
+
+def spend_diverges_from_estimate(*, spent: int, estimate: int, margin: float) -> bool:
+    """True when actual spend is more than estimate × margin (FR-COST-5)."""
+
+    if estimate < 1 or margin <= 0:
+        return False
+    return spent > estimate * margin
+
+
 def require_spend_room(*, spent: int, ceiling: int) -> None:
     if ceiling < 1:
         raise DomainError("The spend ceiling must be at least 1 token.", status_code=422)

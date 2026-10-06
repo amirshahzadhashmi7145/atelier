@@ -21,9 +21,11 @@ from app.domain.graph import require_acyclic
 from app.domain.plan_stage import PlanStage, next_actions, transition
 from app.domain.spend import (
     DEFAULT_ALERT_THRESHOLDS,
+    estimate_tokens_for_size,
     require_spend_room,
     spend_by_role,
     spend_by_task,
+    spend_diverges_from_estimate,
     thresholds_crossed,
     tokens_used,
 )
@@ -272,6 +274,7 @@ class PlanningService:
                     zone=task.zone,
                     state=task.state,
                     size=task.size,
+                    estimate_tokens=int(task.estimate_tokens or 0),
                     requirement_keys=list(task.requirement_keys),
                     depends_on=[key_by_id[dep.depends_on_id] for dep in task.dependencies],
                     retry_count=task.retry_count,
@@ -286,6 +289,8 @@ class PlanningService:
         # Traceability is only meaningful once tasks exist.
         if project.stage != PlanStage.TASKS_READY.value:
             uncovered = []
+        spent = tokens_used(project.runs)
+        estimate = sum(int(task.estimate_tokens or 0) for task in tasks)
         return ProjectSnapshot(
             project=ProjectOut(
                 id=project.id,
@@ -302,7 +307,7 @@ class PlanningService:
                 github_repo=project.github_repo,
                 paused=bool(project.paused),
                 spend_ceiling_tokens=project.spend_ceiling_tokens,
-                spend_tokens=tokens_used(project.runs),
+                spend_tokens=spent,
                 spend_alerts=self._spend_alerts(project),
                 spend_by_role=[
                     SpendByRoleOut(role=role, tokens=tokens)
@@ -315,6 +320,12 @@ class PlanningService:
                         {task.id: task.key for task in tasks},
                     )
                 ],
+                estimate_tokens=estimate,
+                spend_over_estimate=spend_diverges_from_estimate(
+                    spent=spent,
+                    estimate=estimate,
+                    margin=self.settings.spend_estimate_margin,
+                ),
                 created_at=project.created_at,
                 next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
                 uncovered_requirement_keys=uncovered,
@@ -749,6 +760,11 @@ class PlanningService:
                     zone=item.zone,
                     state=place(blocked=bool(depends)).value,
                     size=item.size,
+                    estimate_tokens=estimate_tokens_for_size(
+                        item.size,
+                        s_tokens=self.settings.task_estimate_s_tokens,
+                        m_tokens=self.settings.task_estimate_m_tokens,
+                    ),
                     requirement_keys=requirement_keys,
                     sort_order=int(key.split("-")[1]),
                 )
