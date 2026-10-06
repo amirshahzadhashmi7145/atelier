@@ -40,9 +40,21 @@ from app.models import (
 )
 from app.services.checks import CheckResult, SandboxOptions, run_checks
 from app.services import github as github_api
-from app.schemas import ProjectSnapshot
+from app.schemas import (
+    CheckOut,
+    DefectOut,
+    EventOut,
+    FindingOut,
+    ProjectSnapshot,
+    PullRequestOut,
+    RunOut,
+    TaskDetailOut,
+    TaskOut,
+)
 from app.services.planning import PlanningService, new_id
 from app.services.workspace import Workspace
+
+_DIFF_LIMIT = 20_000
 
 
 class _Write(BaseModel):
@@ -331,6 +343,128 @@ class ExecutionService:
             },
         )
         return self.planning.snapshot(project.id)
+
+    def task_detail(self, project_id: str, task_id: str) -> TaskDetailOut:
+        """Drill from a task to its runs, checks, PR, and branch diff."""
+
+        project = self.planning._project(project_id)
+        task = self._task(project, task_id)
+        key_by_id = {item.id: item.key for item in project.tasks}
+        task_out = TaskOut(
+            id=task.id,
+            key=task.key,
+            title=task.title,
+            description=task.description,
+            zone=task.zone,
+            state=task.state,
+            size=task.size,
+            estimate_tokens=int(task.estimate_tokens or 0),
+            requirement_keys=list(task.requirement_keys),
+            depends_on=[key_by_id[dep.depends_on_id] for dep in task.dependencies],
+            retry_count=task.retry_count,
+            max_retries=task.max_retries,
+            branch_name=task.branch_name,
+        )
+        runs = [
+            RunOut(
+                id=item.id,
+                role=item.role,
+                purpose=item.purpose,
+                provider=item.provider,
+                model=item.model,
+                input_tokens=item.input_tokens,
+                output_tokens=item.output_tokens,
+                task_id=item.task_id,
+            )
+            for item in sorted(project.runs, key=lambda item: item.created_at, reverse=True)
+            if item.task_id == task.id
+        ]
+        checks = [
+            CheckOut(
+                id=item.id,
+                task_id=item.task_id,
+                tier=item.tier,
+                command=item.command,
+                exit_code=item.exit_code,
+                excerpt=item.excerpt,
+            )
+            for item in project.checks
+            if item.task_id == task.id
+        ]
+        findings = [
+            FindingOut(
+                id=item.id,
+                task_id=item.task_id,
+                criterion_key=item.criterion_key,
+                result=item.result,
+                note=item.note,
+            )
+            for item in project.findings
+            if item.task_id == task.id
+        ]
+        defects = [
+            DefectOut(
+                id=item.id,
+                task_id=item.task_id,
+                criterion_key=item.criterion_key,
+                reproduction=item.reproduction,
+                observed=item.observed,
+                expected=item.expected,
+            )
+            for item in project.defects
+            if item.task_id == task.id
+        ]
+        pull_requests = [
+            PullRequestOut(
+                id=item.id,
+                task_id=item.task_id,
+                branch_name=item.branch_name,
+                title=item.title,
+                body=item.body,
+                state=item.state,
+                number=item.number,
+                url=item.url,
+            )
+            for item in project.pull_requests
+            if item.task_id == task.id
+        ]
+        events = [
+            EventOut(
+                id=item.id,
+                type=item.type,
+                actor_kind=item.actor_kind,
+                actor_role=item.actor_role,
+                payload=item.payload,
+                input_tokens=item.input_tokens,
+                output_tokens=item.output_tokens,
+                occurred_at=item.occurred_at,
+            )
+            for item in sorted(project.events, key=lambda item: item.occurred_at, reverse=True)
+            if item.task_id == task.id
+        ]
+        diff: str | None = None
+        truncated = False
+        if task.branch_name:
+            try:
+                text = Workspace(self._root(project)).diff(task.branch_name)
+            except RuntimeError:
+                text = ""
+            if text:
+                if len(text) > _DIFF_LIMIT:
+                    text = text[:_DIFF_LIMIT] + "\n… truncated …\n"
+                    truncated = True
+                diff = text
+        return TaskDetailOut(
+            task=task_out,
+            runs=runs,
+            checks=checks,
+            findings=findings,
+            defects=defects,
+            pull_requests=pull_requests,
+            events=events,
+            diff=diff,
+            diff_truncated=truncated,
+        )
 
     def reassign(self, project_id: str, task_id: str, zone: str) -> ProjectSnapshot:
         """A person moves a waiting task to another ownership zone."""

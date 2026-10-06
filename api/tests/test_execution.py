@@ -63,6 +63,27 @@ def _failure(body: dict) -> str:
     return event["payload"]["cause"]
 
 
+def test_task_detail_includes_runs_checks_pr_and_diff(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    first = _by_key(ran.json(), "TASK-001")
+    detail = client.get(f"/api/projects/{project_id}/tasks/{first['id']}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["task"]["key"] == "TASK-001"
+    assert body["runs"]
+    assert all(item["task_id"] == first["id"] for item in body["runs"])
+    assert body["checks"]
+    assert body["pull_requests"]
+    assert body["diff"]
+    assert "create_record" in body["diff"] or "server/app.py" in body["diff"]
+    assert body["events"]
+    missing = client.get(f"/api/projects/{project_id}/tasks/tsk_missing")
+    assert missing.status_code == 404
+
+
 def test_a_person_can_reassign_a_ready_task_to_another_zone(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)

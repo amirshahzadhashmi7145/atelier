@@ -194,6 +194,18 @@ class RunOut(BaseModel):
     task_id: str | None = None
 
 
+class TaskDetailOut(BaseModel):
+    task: TaskOut
+    runs: list[RunOut]
+    checks: list[CheckOut]
+    findings: list[FindingOut]
+    defects: list[DefectOut]
+    pull_requests: list[PullRequestOut]
+    events: list[EventOut]
+    diff: str | None = None
+    diff_truncated: bool = False
+
+
 class SpendByRoleOut(BaseModel):
     role: str
     tokens: int
