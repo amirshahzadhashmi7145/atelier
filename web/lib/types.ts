@@ -57,6 +57,13 @@ export type Snapshot = {
     estimate_tokens?: number;
     spend_over_estimate?: boolean;
     gate_policy?: Record<string, "human" | "automatic">;
+    status?: {
+      task_counts: Record<string, number>;
+      blocked: { task_key: string; blocked_by: string[] }[];
+      open_gates: string[];
+      agents: { role: string; state: string }[];
+      needs_you: string[];
+    };
     created_at: string;
     next_actions: string[];
     uncovered_requirement_keys: string[];

@@ -96,6 +96,13 @@ export default function ProjectPage() {
   const estimateTokens = project.estimate_tokens ?? 0;
   const spendOverEstimate = Boolean(project.spend_over_estimate);
   const gatePolicy = project.gate_policy ?? {};
+  const status = project.status ?? {
+    task_counts: {},
+    blocked: [],
+    open_gates: [],
+    agents: [],
+    needs_you: [],
+  };
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
@@ -229,6 +236,46 @@ export default function ProjectPage() {
           </p>
         ) : null}
         {error ? <p className="text-sm text-oxide">{error}</p> : null}
+
+        <section className="border border-line bg-white/70 p-5">
+          <h2 className="font-serif text-2xl">Status</h2>
+          <p className="mt-1 text-sm text-muted">
+            Task counts, who is waiting on whom, open gates, and which agents are busy.
+          </p>
+          {status.needs_you.length ? (
+            <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
+              Needs you: {status.needs_you.join(" · ")}
+            </p>
+          ) : null}
+          {Object.keys(status.task_counts).length ? (
+            <p className="mt-4 text-sm">
+              Tasks:{" "}
+              {Object.entries(status.task_counts)
+                .map(([state, count]) => `${state.replaceAll("_", " ")} ${count}`)
+                .join(" · ")}
+            </p>
+          ) : (
+            <p className="mt-4 text-sm text-muted">No tasks yet.</p>
+          )}
+          {status.blocked.length ? (
+            <ul className="mt-3 space-y-1 text-sm text-muted">
+              {status.blocked.map((item) => (
+                <li key={item.task_key}>
+                  {item.task_key} blocked by {item.blocked_by.join(", ") || "unfinished work"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {status.open_gates.length ? (
+            <p className="mt-3 text-sm text-muted">Open gates: {status.open_gates.join(" · ")}</p>
+          ) : null}
+          {status.agents.length ? (
+            <p className="mt-3 text-sm">
+              Agents:{" "}
+              {status.agents.map((agent) => `${agent.role} ${agent.state}`).join(" · ")}
+            </p>
+          ) : null}
+        </section>
 
         <section className="border border-line bg-white/70 p-5">
           <h2 className="font-serif text-2xl">Approval policy</h2>
@@ -620,9 +667,9 @@ export default function ProjectPage() {
               onto main, re-runs the checks, then merges and unblocks whatever was waiting. After too many
               failed attempts a task escalates and waits for you to resume it.
             </p>
-            {needsYou(snapshot).length > 0 ? (
+            {status.needs_you.length > 0 ? (
               <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
-                Needs you first: {needsYou(snapshot).join(" · ")}
+                Needs you first: {status.needs_you.join(" · ")}
               </p>
             ) : null}
             {can("run_ready") ? (
@@ -830,23 +877,6 @@ function taskPriority(state: string): number {
   if (state === "in_progress") return 4;
   if (state === "blocked") return 5;
   return 6;
-}
-
-function needsYou(snapshot: Snapshot): string[] {
-  const lines: string[] = [];
-  for (const task of snapshot.tasks) {
-    if (task.state === "escalated") {
-      lines.push(`${task.key} escalated`);
-    } else if (task.state === "gated") {
-      lines.push(`${task.key} awaiting merge`);
-    } else if (
-      task.state === "in_review" &&
-      snapshot.findings.some((finding) => finding.task_id === task.id && finding.result === "untestable")
-    ) {
-      lines.push(`${task.key} untestable`);
-    }
-  }
-  return lines;
 }
 
 function GateButtons({
