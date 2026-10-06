@@ -24,7 +24,13 @@ from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.gates import is_automatic
 from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
-from app.domain.task_machine import TaskState, require_amendable, require_reassignable, transition
+from app.domain.task_machine import (
+    TaskState,
+    require_amendable,
+    require_cancellable,
+    require_reassignable,
+    transition,
+)
 from app.domain.validation import ALLOWED_ZONES
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
@@ -361,6 +367,29 @@ class ExecutionService:
             payload={
                 "key": task.key,
                 "summary": "A person returned the escalated task to ready.",
+            },
+        )
+        return self.planning.snapshot(project.id)
+
+    def cancel(self, project_id: str, task_id: str) -> ProjectSnapshot:
+        """A person stops a waiting task (FR-HIL-4 cancel)."""
+
+        project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        task = self._task(project, task_id)
+        require_cancellable(task.state)
+        task.state, task.retry_count = self._move(task, TaskState.CANCELLED)
+        for item in project.pull_requests:
+            if item.task_id == task.id and item.state == "open":
+                item.state = "closed"
+        self.planning._event(
+            project,
+            "task.cancelled",
+            actor_kind="user",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "summary": f"A person cancelled {task.key}.",
             },
         )
         return self.planning.snapshot(project.id)

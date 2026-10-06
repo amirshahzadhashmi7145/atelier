@@ -3,9 +3,11 @@ from app.domain.plan_stage import PlanStage, transition as plan_transition
 from app.domain.task_machine import (
     TaskState,
     can_amend,
+    can_cancel,
     can_reassign,
     place,
     require_amendable,
+    require_cancellable,
     require_reassignable,
     transition,
 )
@@ -65,6 +67,15 @@ def test_a_branch_can_be_amended_while_the_agent_is_not_writing():
     with pytest.raises(DomainError):
         require_amendable(TaskState.IN_REVIEW, branch_name=None)
     require_amendable(TaskState.READY, branch_name="task/TASK-001")
+
+
+def test_a_waiting_task_can_be_cancelled():
+    assert can_cancel(TaskState.READY) is True
+    assert can_cancel(TaskState.IN_REVIEW) is True
+    assert can_cancel(TaskState.IN_PROGRESS) is False
+    with pytest.raises(DomainError):
+        require_cancellable(TaskState.IN_PROGRESS)
+    require_cancellable(TaskState.ESCALATED)
 
 
 def test_cycle_is_reported_as_a_loop():

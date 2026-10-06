@@ -253,6 +253,15 @@ def resume_task(
     return service.resume(project_id, task_id)
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/cancel", response_model=ProjectSnapshot)
+def cancel_task(
+    project_id: str,
+    task_id: str,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.cancel(project_id, task_id)
+
+
 @router.post("/projects/{project_id}/tasks/{task_id}/reassign", response_model=ProjectSnapshot)
 def reassign_task(
     project_id: str,

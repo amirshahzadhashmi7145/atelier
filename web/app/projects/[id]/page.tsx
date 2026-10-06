@@ -975,6 +975,18 @@ export default function ProjectPage() {
                         Resume escalated task
                       </button>
                     ) : null}
+                    {canCancel(task.state) ? (
+                      <button
+                        type="button"
+                        disabled={busy || project.paused}
+                        className="mt-2 border border-oxide px-3 py-2 text-sm text-oxide"
+                        onClick={() =>
+                          run(() => api(`/api/projects/${project.id}/tasks/${task.id}/cancel`, { method: "POST" }))
+                        }
+                      >
+                        Cancel task
+                      </button>
+                    ) : null}
                     {task.state === "in_review" ? (
                       <div className="mt-2 flex flex-wrap gap-3">
                         <button
@@ -1159,6 +1171,19 @@ function canAmend(state: string): boolean {
     state === "in_review" ||
     state === "gated" ||
     state === "changes_requested" ||
+    state === "escalated"
+  );
+}
+
+function canCancel(state: string): boolean {
+  return (
+    state === "draft" ||
+    state === "blocked" ||
+    state === "ready" ||
+    state === "in_review" ||
+    state === "gated" ||
+    state === "changes_requested" ||
+    state === "failed" ||
     state === "escalated"
   );
 }
