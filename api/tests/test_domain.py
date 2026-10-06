@@ -1,6 +1,6 @@
 from app.domain.graph import find_cycle
 from app.domain.plan_stage import PlanStage, transition as plan_transition
-from app.domain.task_machine import TaskState, place, transition
+from app.domain.task_machine import TaskState, can_reassign, place, require_reassignable, transition
 from app.domain.validation import uncovered_requirements
 from app.errors import DomainError
 import pytest
@@ -38,6 +38,16 @@ def test_retry_budget_forces_an_escalation():
     state, retries = transition(TaskState.FAILED, TaskState.ESCALATED, retry_count=2, max_retries=2)
     assert state is TaskState.ESCALATED
     assert retries == 2
+
+
+def test_ready_and_blocked_tasks_can_be_reassigned():
+    assert can_reassign(TaskState.READY) is True
+    assert can_reassign(TaskState.BLOCKED) is True
+    assert can_reassign(TaskState.ESCALATED) is True
+    assert can_reassign(TaskState.IN_PROGRESS) is False
+    assert can_reassign(TaskState.GATED) is False
+    with pytest.raises(DomainError):
+        require_reassignable(TaskState.IN_REVIEW)
 
 
 def test_cycle_is_reported_as_a_loop():
