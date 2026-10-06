@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     github_api_url: str = "https://api.github.com"
     default_spend_ceiling_tokens: int = 1_000_000
     spend_alert_thresholds: str = "50,80,95"
+    task_estimate_s_tokens: int = 2_000
+    task_estimate_m_tokens: int = 8_000
+    spend_estimate_multiple: float = 2.0
+    spend_estimate_margin: float = 1.5
     workspaces_dir: str = "./workspaces"
 
     @property
