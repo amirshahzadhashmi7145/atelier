@@ -365,6 +365,7 @@ class PlanningService:
                     retry_count=task.retry_count,
                     max_retries=task.max_retries,
                     branch_name=task.branch_name,
+                    source_task_key=key_by_id.get(task.source_task_id) if task.source_task_id else None,
                 )
             )
         uncovered = uncovered_requirements(

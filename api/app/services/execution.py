@@ -368,6 +368,7 @@ class ExecutionService:
             retry_count=task.retry_count,
             max_retries=task.max_retries,
             branch_name=task.branch_name,
+            source_task_key=key_by_id.get(task.source_task_id) if task.source_task_id else None,
         )
         runs = [
             RunOut(
@@ -615,6 +616,7 @@ class ExecutionService:
             [
                 ClaimCandidate(task.key, task.state, task.zone, task.sort_order)
                 for task in project.tasks
+                if not task.source_task_id
             ]
         )
         if chosen is None:
@@ -735,6 +737,7 @@ class ExecutionService:
             passed_checks = checks
             break
         task.state, task.retry_count = self._move(task, TaskState.IN_REVIEW)
+        self._close_routed_defect_tasks(project, task)
         self.planning._event(
             project,
             "task.in_review",
@@ -744,6 +747,25 @@ class ExecutionService:
             payload={"key": task.key, "branch": branch, "summary": summary},
         )
         self._open_pull_request(project, task, workspace, summary, passed_checks)
+
+    def _close_routed_defect_tasks(self, project: Project, task: Task) -> None:
+        """A rework attempt supersedes open defect tickets for this task."""
+
+        for item in project.tasks:
+            if item.source_task_id != task.id or item.state != TaskState.READY.value:
+                continue
+            item.state = TaskState.DONE.value
+            self.planning._event(
+                project,
+                "task.defect_resolved",
+                actor_kind="system",
+                task_id=item.id,
+                payload={
+                    "key": item.key,
+                    "source_key": task.key,
+                    "summary": f"{item.key} closed; {task.key} is back in review.",
+                },
+            )
 
     def _sandbox(self) -> SandboxOptions | None:
         if not self.settings.check_sandbox:
@@ -1009,6 +1031,7 @@ class ExecutionService:
                     expected=expected,
                 )
             )
+        fix = self._route_defect_task(project, task, rows)
         task.state, task.retry_count = self._move(task, TaskState.CHANGES_REQUESTED)
         task.state, task.retry_count = self._move(task, TaskState.READY)
         self.planning._event(
@@ -1017,8 +1040,69 @@ class ExecutionService:
             actor_kind=actor_kind,
             actor_role=actor_role,
             task_id=task.id,
-            payload={"key": task.key, "summary": summary},
+            payload={
+                "key": task.key,
+                "summary": summary,
+                "fix_task_key": fix.key if fix else None,
+            },
         )
+
+    def _route_defect_task(
+        self,
+        project: Project,
+        task: Task,
+        rows: list[tuple[str, str, str, str]],
+    ) -> Task | None:
+        """Open a linked task in the owning zone so the defect is visible work.
+
+        The original task stays the executable unit on the same branch; this
+        row is the routed ticket the zone owns (FR-QA-5).
+        """
+
+        if task.source_task_id:
+            return None
+        if not rows:
+            return None
+        next_index = max((int(item.key.split("-")[1]) for item in project.tasks), default=0) + 1
+        key = f"TASK-{next_index:03d}"
+        lines = [
+            f"{criterion}: expected {expected}; observed {observed}. Reproduce: {reproduction}"
+            for criterion, reproduction, observed, expected in rows
+        ]
+        fix = Task(
+            id=new_id("tsk"),
+            project_id=project.id,
+            key=key,
+            title=f"Fix defects from {task.key}",
+            description=(
+                f"Routed from {task.key} to the {task.zone} zone.\n\n" + "\n".join(lines)
+            ),
+            zone=task.zone,
+            state=TaskState.READY.value,
+            size="S",
+            estimate_tokens=0,
+            requirement_keys=list(task.requirement_keys),
+            retry_count=0,
+            max_retries=task.max_retries,
+            branch_name=task.branch_name,
+            source_task_id=task.id,
+            sort_order=next_index,
+        )
+        self.session.add(fix)
+        self.session.flush()
+        self.planning._event(
+            project,
+            "task.defect_routed",
+            actor_kind="system",
+            task_id=fix.id,
+            payload={
+                "key": fix.key,
+                "source_key": task.key,
+                "zone": fix.zone,
+                "summary": f"{fix.key} opened for defects on {task.key}.",
+            },
+        )
+        return fix
 
     def _criteria(self, project: Project, task: Task) -> list[tuple[str, str]]:
         wanted = set(task.requirement_keys)
