@@ -1,3 +1,4 @@
+from app.domain.dependencies import dependency_files
 from app.domain.pull_request import CheckLine, compose
 from app.services.github import open_pull_request
 from unittest.mock import patch
@@ -18,6 +19,7 @@ def test_a_pull_request_names_the_task_requirements_summary_and_checks():
             CheckLine("integration", "python3 -c \"print('integration ok')\"", 0),
         ],
         assumptions=["Members sign in with email."],
+        dependencies=["server/requirements.txt"],
     )
     assert draft.title == "TASK-001: Persist records"
     assert "TASK-001" in draft.body
@@ -25,6 +27,24 @@ def test_a_pull_request_names_the_task_requirements_summary_and_checks():
     assert "Add the create endpoint." in draft.body
     assert "unit" in draft.body and "exited 0" in draft.body
     assert "Members sign in with email." in draft.body
+    assert "## Dependencies" in draft.body
+    assert "server/requirements.txt" in draft.body
+
+
+def test_dependency_files_are_listed_from_the_diff():
+    diff = """\
+diff --git a/server/requirements.txt b/server/requirements.txt
+--- a/server/requirements.txt
++++ b/server/requirements.txt
+@@ -0,0 +1 @@
++fastapi
+diff --git a/server/app.py b/server/app.py
+--- /dev/null
++++ b/server/app.py
+@@ -0,0 +1 @@
++print(1)
+"""
+    assert dependency_files(diff) == ["server/requirements.txt"]
 
 
 def test_github_open_pull_request_posts_the_draft():

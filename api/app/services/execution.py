@@ -18,13 +18,20 @@ from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
+from app.domain.dependencies import dependency_files
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
 from app.domain.gates import is_automatic
 from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
-from app.domain.task_machine import TaskState, require_amendable, require_reassignable, transition
+from app.domain.task_machine import (
+    TaskState,
+    require_amendable,
+    require_cancellable,
+    require_reassignable,
+    transition,
+)
 from app.domain.validation import ALLOWED_ZONES
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
@@ -363,6 +370,29 @@ class ExecutionService:
             payload={
                 "key": task.key,
                 "summary": "A person returned the escalated task to ready.",
+            },
+        )
+        return self.planning.snapshot(project.id)
+
+    def cancel(self, project_id: str, task_id: str) -> ProjectSnapshot:
+        """A person stops a waiting task (FR-HIL-4 cancel)."""
+
+        project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        task = self._task(project, task_id)
+        require_cancellable(task.state)
+        task.state, task.retry_count = self._move(task, TaskState.CANCELLED)
+        for item in project.pull_requests:
+            if item.task_id == task.id and item.state == "open":
+                item.state = "closed"
+        self.planning._event(
+            project,
+            "task.cancelled",
+            actor_kind="user",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "summary": f"A person cancelled {task.key}.",
             },
         )
         return self.planning.snapshot(project.id)
@@ -840,6 +870,10 @@ class ExecutionService:
             return
         if not task.branch_name:
             raise DomainError("This task has no branch for a pull request.")
+        try:
+            branch_diff = workspace.diff(task.branch_name)
+        except RuntimeError:
+            branch_diff = ""
         draft = compose(
             task_key=task.key,
             title=task.title,
@@ -855,6 +889,7 @@ class ExecutionService:
                 for item in checks
             ],
             assumptions=[item.statement for item in project.assumptions],
+            dependencies=dependency_files(branch_diff),
         )
         record = PullRequest(
             id=new_id("pr"),

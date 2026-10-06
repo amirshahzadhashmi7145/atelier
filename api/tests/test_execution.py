@@ -177,6 +177,7 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert pr["title"].startswith("TASK-001:")
     assert "FR-" in pr["body"]
     assert "Test results" in pr["body"]
+    assert "## Dependencies" in pr["body"]
     assert pr["url"] is None
 
     too_soon = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/accept")
@@ -331,6 +332,20 @@ def test_an_underspecified_task_escalates_instead_of_inventing(tmp_path: Path):
     event = next(item for item in body["events"] if item["type"] == "task.needs_clarification")
     assert "status codes" in event["payload"]["clarification"]
     assert not (tmp_path / project_id / "server" / "app.py").exists()
+def test_a_person_can_cancel_a_waiting_task(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    cancelled = client.post(f"/api/projects/{project_id}/tasks/{task_id}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    body = cancelled.json()
+    assert _by_key(body, "TASK-001")["state"] == "cancelled"
+    pr = next(item for item in body["pull_requests"] if item["task_id"] == task_id)
+    assert pr["state"] == "closed"
+    assert any(event["type"] == "task.cancelled" for event in body["events"])
+    again = client.post(f"/api/projects/{project_id}/tasks/{task_id}/cancel")
+    assert again.status_code == 409
 
 
 def test_an_escalated_task_can_be_resumed_by_a_person(tmp_path: Path):

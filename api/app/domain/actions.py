@@ -21,6 +21,7 @@ _DECISIONS = {
     "task.reassigned",
     "task.resumed",
     "task.branch_amended",
+    "task.cancelled",
 }
 
 _ARTEFACTS = {
