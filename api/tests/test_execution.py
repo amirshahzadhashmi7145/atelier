@@ -321,6 +321,22 @@ def test_revoking_agents_blocks_runs_but_keeps_human_actions(tmp_path: Path):
     assert _by_key(ran.json(), "TASK-001")["state"] == "in_review"
 
 
+def test_a_person_can_cancel_a_waiting_task(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    task_id = _by_key(ran.json(), "TASK-001")["id"]
+    cancelled = client.post(f"/api/projects/{project_id}/tasks/{task_id}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    body = cancelled.json()
+    assert _by_key(body, "TASK-001")["state"] == "cancelled"
+    pr = next(item for item in body["pull_requests"] if item["task_id"] == task_id)
+    assert pr["state"] == "closed"
+    assert any(event["type"] == "task.cancelled" for event in body["events"])
+    again = client.post(f"/api/projects/{project_id}/tasks/{task_id}/cancel")
+    assert again.status_code == 409
+
+
 def test_an_escalated_task_can_be_resumed_by_a_person(tmp_path: Path):
     client = client_for(tmp_path, _OutsideZone())
     project_id = _prepare(client)
