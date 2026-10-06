@@ -69,12 +69,13 @@ def test_a_branch_can_be_amended_while_the_agent_is_not_writing():
     require_amendable(TaskState.READY, branch_name="task/TASK-001")
 
 
-def test_a_waiting_task_can_be_cancelled():
+def test_a_waiting_or_stuck_task_can_be_cancelled():
     assert can_cancel(TaskState.READY) is True
     assert can_cancel(TaskState.IN_REVIEW) is True
-    assert can_cancel(TaskState.IN_PROGRESS) is False
+    assert can_cancel(TaskState.IN_PROGRESS) is True
+    assert can_cancel(TaskState.DONE) is False
     with pytest.raises(DomainError):
-        require_cancellable(TaskState.IN_PROGRESS)
+        require_cancellable(TaskState.DONE)
     require_cancellable(TaskState.ESCALATED)
 
 

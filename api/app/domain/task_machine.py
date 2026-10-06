@@ -33,7 +33,7 @@ _ALLOWED: dict[TaskState, set[TaskState]] = {
     TaskState.DRAFT: {TaskState.BLOCKED, TaskState.READY, TaskState.CANCELLED},
     TaskState.BLOCKED: {TaskState.READY, TaskState.CANCELLED},
     TaskState.READY: {TaskState.IN_PROGRESS, TaskState.CANCELLED},
-    TaskState.IN_PROGRESS: {TaskState.FAILED, TaskState.IN_REVIEW},
+    TaskState.IN_PROGRESS: {TaskState.FAILED, TaskState.IN_REVIEW, TaskState.CANCELLED},
     TaskState.FAILED: {TaskState.READY, TaskState.ESCALATED, TaskState.CANCELLED},
     TaskState.ESCALATED: {TaskState.READY, TaskState.CANCELLED},
     TaskState.IN_REVIEW: {TaskState.GATED, TaskState.CHANGES_REQUESTED, TaskState.CANCELLED},
@@ -68,11 +68,13 @@ _AMENDABLE = {
     TaskState.ESCALATED,
 }
 
-# A person may cancel work that is not mid-agent-write (sync run).
+# A person may cancel waiting work, or an in-progress task left stuck
+# after a crash (FR-HIL-4 cancel a run).
 _CANCELLABLE = {
     TaskState.DRAFT,
     TaskState.BLOCKED,
     TaskState.READY,
+    TaskState.IN_PROGRESS,
     TaskState.IN_REVIEW,
     TaskState.GATED,
     TaskState.CHANGES_REQUESTED,
@@ -108,10 +110,7 @@ def can_cancel(state: TaskState | str) -> bool:
 def require_cancellable(state: TaskState | str) -> None:
     if not can_cancel(state):
         current = state if isinstance(state, TaskState) else TaskState(state)
-        raise DomainError(
-            f"A task in {current.value} cannot be cancelled. "
-            "Wait until the agent is not writing it."
-        )
+        raise DomainError(f"A task in {current.value} cannot be cancelled.")
 
 
 def require_amendable(state: TaskState | str, *, branch_name: str | None) -> None:
