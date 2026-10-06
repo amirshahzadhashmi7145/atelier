@@ -31,9 +31,14 @@ class TaskState(StrEnum):
 
 _ALLOWED: dict[TaskState, set[TaskState]] = {
     TaskState.DRAFT: {TaskState.BLOCKED, TaskState.READY, TaskState.CANCELLED},
-    TaskState.BLOCKED: {TaskState.READY, TaskState.CANCELLED},
+    TaskState.BLOCKED: {TaskState.READY, TaskState.CANCELLED, TaskState.ESCALATED},
     TaskState.READY: {TaskState.IN_PROGRESS, TaskState.CANCELLED},
-    TaskState.IN_PROGRESS: {TaskState.FAILED, TaskState.IN_REVIEW, TaskState.CANCELLED},
+    TaskState.IN_PROGRESS: {
+        TaskState.FAILED,
+        TaskState.IN_REVIEW,
+        TaskState.CANCELLED,
+        TaskState.ESCALATED,
+    },
     TaskState.FAILED: {TaskState.READY, TaskState.ESCALATED, TaskState.CANCELLED},
     TaskState.ESCALATED: {TaskState.READY, TaskState.CANCELLED},
     TaskState.IN_REVIEW: {TaskState.GATED, TaskState.CHANGES_REQUESTED, TaskState.CANCELLED},

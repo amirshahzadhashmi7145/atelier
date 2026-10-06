@@ -43,7 +43,8 @@ from app.domain.spend import (
     thresholds_crossed,
     tokens_used,
 )
-from app.domain.task_machine import place
+from app.domain.stall import StallTask, find_stalls
+from app.domain.task_machine import TaskState, place, transition as task_transition
 from app.domain.validation import check_task_shape, require_criteria, uncovered_requirements
 from app.errors import DomainError
 from app.gateway.base import LlmClient, LlmResult
@@ -345,6 +346,8 @@ class PlanningService:
         # earlier, before those rows existed.
         self.session.flush()
         project = self._project(project_id)
+        self._recover_stalls(project)
+        self.session.flush()
         self.session.expire(project)
         requirements = sorted(project.requirements, key=lambda item: item.sort_order)
         tasks = sorted(project.tasks, key=lambda item: item.sort_order)
@@ -1109,6 +1112,44 @@ class PlanningService:
             actor_kind="user",
             payload={"statement": statement},
         )
+
+    def _recover_stalls(self, project: Project) -> None:
+        """Escalate work that has stopped progressing (FR-PLAN-21)."""
+
+        if project.stage != PlanStage.TASKS_READY.value:
+            return
+        claimed_at = {}
+        for event in sorted(project.events, key=lambda item: item.occurred_at):
+            if event.type == "task.claimed" and event.task_id:
+                claimed_at[event.task_id] = event.occurred_at
+        stalls = find_stalls(
+            [StallTask(item.id, item.key, item.state) for item in project.tasks],
+            claimed_at=claimed_at,
+            budget_seconds=float(self.settings.run_max_seconds),
+        )
+        for stall in stalls:
+            task = next((item for item in project.tasks if item.id == stall.task_id), None)
+            if task is None or task.state == TaskState.ESCALATED.value:
+                continue
+            state, retries = task_transition(
+                TaskState(task.state),
+                TaskState.ESCALATED,
+                retry_count=task.retry_count,
+                max_retries=task.max_retries,
+            )
+            task.state = state.value
+            task.retry_count = retries
+            self._event(
+                project,
+                "task.stalled",
+                actor_kind="system",
+                task_id=task.id,
+                payload={
+                    "key": task.key,
+                    "reason": stall.reason,
+                    "summary": stall.summary,
+                },
+            )
 
     def _move(self, project: Project, target: PlanStage) -> None:
         previous = project.stage
