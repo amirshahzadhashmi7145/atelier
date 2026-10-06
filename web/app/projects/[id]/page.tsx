@@ -65,6 +65,18 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
+  // FR-UI-6: surface state changes within a few seconds without a full reload.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (busy || detailBusy || document.hidden) return;
+      refresh().catch(() => {
+        // Keep the last good snapshot; the next tick retries.
+      });
+    }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.id, busy, detailBusy]);
+
   async function inspectTask(taskId: string) {
     if (openTaskId === taskId) {
       setOpenTaskId(null);
