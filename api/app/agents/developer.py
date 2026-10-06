@@ -21,8 +21,12 @@ def implement_prompt(
         + zone.replace("_", " ")
         + " engineer. Implement only this task. "
         "Write files inside your zone and stop. "
+        "If the task is under-specified, do not invent requirements: set "
+        "needs_clarification true, put one concrete question in clarification, "
+        "leave writes empty, and set done false. "
         + JSON_RULES
         + '\nShape: {"summary": string, "done": boolean, '
+        '"needs_clarification": boolean, "clarification": string, '
         '"writes": [{"path": string, "content": string}]}'
     )
     user = (
