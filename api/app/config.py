@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     sandbox_pids_limit: int = 64
     github_token: str = ""
     github_api_url: str = "https://api.github.com"
+    # Comma-separated hosts agents may pull packages from (FR-DEV-8).
+    allowed_dependency_hosts: str = (
+        "pypi.org,files.pythonhosted.org,registry.npmjs.org,"
+        "proxy.golang.org,sum.golang.org,crates.io,static.crates.io,rubygems.org"
+    )
     default_spend_ceiling_tokens: int = 1_000_000
     spend_alert_thresholds: str = "50,80,95"
     task_estimate_s_tokens: int = 2_000
@@ -49,3 +54,7 @@ class Settings(BaseSettings):
                 continue
             values.append(int(text))
         return values
+
+    @property
+    def allowed_dependency_host_set(self) -> set[str]:
+        return {item.strip().lower() for item in self.allowed_dependency_hosts.split(",") if item.strip()}
