@@ -19,7 +19,7 @@ from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.control import require_active
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
-from app.domain.spend import require_spend_room, tokens_used
+from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
 from app.domain.task_machine import TaskState, transition
 from app.domain.zones import require_inside_zone
@@ -600,18 +600,54 @@ class ExecutionService:
 
     def _fail(self, project: Project, task: Task, cause: str) -> None:
         task.state, task.retry_count = self._move(task, TaskState.FAILED)
-        try:
-            task.state, task.retry_count = self._move(task, TaskState.READY)
-            outcome = "ready"
-        except DomainError:
+        self.session.flush()
+        self.session.expire(project, ["runs"])
+        spent = sum(run_tokens(run) for run in project.runs if run.task_id == task.id)
+        estimate = int(task.estimate_tokens or 0)
+        overspend = spend_exceeds_estimate(
+            spent=spent,
+            estimate=estimate,
+            multiple=self.settings.spend_estimate_multiple,
+        )
+        if overspend:
             task.state, task.retry_count = self._move(task, TaskState.ESCALATED)
             outcome = "escalated"
+            self.planning._event(
+                project,
+                "task.spend_overspend",
+                actor_kind="system",
+                task_id=task.id,
+                payload={
+                    "key": task.key,
+                    "spend_tokens": spent,
+                    "estimate_tokens": estimate,
+                    "multiple": self.settings.spend_estimate_multiple,
+                    "summary": (
+                        f"{task.key} spent {spent} tokens against an estimate of {estimate}. "
+                        "It was escalated instead of retried."
+                    ),
+                },
+            )
+        else:
+            try:
+                task.state, task.retry_count = self._move(task, TaskState.READY)
+                outcome = "ready"
+            except DomainError:
+                task.state, task.retry_count = self._move(task, TaskState.ESCALATED)
+                outcome = "escalated"
         self.planning._event(
             project,
             "task.failed",
             actor_kind="system",
             task_id=task.id,
-            payload={"key": task.key, "cause": cause, "outcome": outcome, "retry_count": task.retry_count},
+            payload={
+                "key": task.key,
+                "cause": cause,
+                "outcome": outcome,
+                "retry_count": task.retry_count,
+                "spend_tokens": spent,
+                "estimate_tokens": estimate,
+            },
         )
 
     def _unblock(self, project: Project) -> None:

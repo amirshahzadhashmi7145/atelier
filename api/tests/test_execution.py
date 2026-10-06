@@ -212,6 +212,30 @@ def test_a_run_that_never_finishes_is_stopped_by_the_iteration_budget(tmp_path: 
     assert not (tmp_path / project_id / "server" / "app.py").exists()
 
 
+def test_overspending_a_task_estimate_escalates_instead_of_retrying(tmp_path: Path):
+    client = client_for(
+        tmp_path,
+        _NeverDone(),
+        run_max_iterations=2,
+        task_estimate_s_tokens=3,
+        task_estimate_m_tokens=3,
+        spend_estimate_multiple=1.0,
+    )
+    project_id = _prepare(client)
+    prepared = client.get(f"/api/projects/{project_id}").json()
+    assert prepared["project"]["estimate_tokens"] > 0
+    assert all(task["estimate_tokens"] == 3 for task in prepared["tasks"])
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    task = _by_key(body, "TASK-001")
+    assert task["state"] == "escalated"
+    assert any(event["type"] == "task.spend_overspend" for event in body["events"])
+    failed = next(item for item in body["events"] if item["type"] == "task.failed")
+    assert failed["payload"]["outcome"] == "escalated"
+    assert failed["payload"]["spend_tokens"] > failed["payload"]["estimate_tokens"]
+
+
 def test_repeating_the_same_change_stops_the_run(tmp_path: Path):
     client = client_for(tmp_path, _SameChange())
     project_id = _prepare(client)

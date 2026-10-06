@@ -110,6 +110,7 @@ class TaskOut(BaseModel):
     zone: str
     state: str
     size: str
+    estimate_tokens: int = 0
     requirement_keys: list[str]
     depends_on: list[str]
     retry_count: int
@@ -214,6 +215,8 @@ class ProjectOut(BaseModel):
     spend_alerts: list[int] = []
     spend_by_role: list[SpendByRoleOut] = []
     spend_by_task: list[SpendByTaskOut] = []
+    estimate_tokens: int = 0
+    spend_over_estimate: bool = False
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]
