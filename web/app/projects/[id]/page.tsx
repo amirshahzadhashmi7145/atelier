@@ -1180,6 +1180,7 @@ function canCancel(state: string): boolean {
     state === "draft" ||
     state === "blocked" ||
     state === "ready" ||
+    state === "in_progress" ||
     state === "in_review" ||
     state === "gated" ||
     state === "changes_requested" ||
