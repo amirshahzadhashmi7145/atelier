@@ -57,6 +57,15 @@ _REASSIGNABLE = {
     TaskState.ESCALATED,
 }
 
+# A person may amend a branch while the agent is not writing it.
+_AMENDABLE = {
+    TaskState.READY,
+    TaskState.IN_REVIEW,
+    TaskState.GATED,
+    TaskState.CHANGES_REQUESTED,
+    TaskState.ESCALATED,
+}
+
 
 def can_reassign(state: TaskState | str) -> bool:
     current = state if isinstance(state, TaskState) else TaskState(state)
@@ -69,6 +78,22 @@ def require_reassignable(state: TaskState | str) -> None:
         raise DomainError(
             f"A task in {current.value} cannot be reassigned. "
             "Wait until it is ready, blocked, escalated, or sent back."
+        )
+
+
+def can_amend(state: TaskState | str) -> bool:
+    current = state if isinstance(state, TaskState) else TaskState(state)
+    return current in _AMENDABLE
+
+
+def require_amendable(state: TaskState | str, *, branch_name: str | None) -> None:
+    if not branch_name:
+        raise DomainError("This task has no branch to amend.", status_code=422)
+    if not can_amend(state):
+        current = state if isinstance(state, TaskState) else TaskState(state)
+        raise DomainError(
+            f"A task in {current.value} cannot have its branch amended. "
+            "Wait until the agent is not writing it."
         )
 
 

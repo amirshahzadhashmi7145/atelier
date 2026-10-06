@@ -62,6 +62,12 @@ class TaskReassign(BaseModel):
     zone: Literal["backend", "frontend", "ai_engineer"]
 
 
+class TaskAmend(BaseModel):
+    path: str = Field(min_length=1, max_length=400)
+    content: str
+    summary: str = Field(default="Person amended the branch.", min_length=1, max_length=200)
+
+
 class CriterionOut(BaseModel):
     id: str
     key: str

@@ -49,6 +49,9 @@ export default function ProjectPage() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  const [amendPath, setAmendPath] = useState("");
+  const [amendContent, setAmendContent] = useState("");
+  const [amendSummary, setAmendSummary] = useState("");
 
   async function refresh() {
     const next = await loadProject(params.id);
@@ -74,10 +77,37 @@ export default function ProjectPage() {
       const detail = await loadTaskDetail(params.id, taskId);
       setOpenTaskId(taskId);
       setTaskDetail(detail);
+      setAmendPath("");
+      setAmendContent("");
+      setAmendSummary("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load that task.");
     } finally {
       setDetailBusy(false);
+    }
+  }
+
+  async function amendBranch(taskId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const detail = await api<TaskDetail>(`/api/projects/${params.id}/tasks/${taskId}/amend`, {
+        method: "POST",
+        body: JSON.stringify({
+          path: amendPath,
+          content: amendContent,
+          summary: amendSummary.trim() || "Person amended the branch.",
+        }),
+      });
+      setTaskDetail(detail);
+      setAmendPath("");
+      setAmendContent("");
+      setAmendSummary("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The branch could not be amended.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -828,6 +858,51 @@ export default function ProjectPage() {
                             </ul>
                           </div>
                         ) : null}
+                        {canAmend(task.state) && task.branch_name ? (
+                          <form
+                            className="space-y-2 border-t border-line pt-3"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void amendBranch(task.id);
+                            }}
+                          >
+                            <p className="text-xs tracking-widest text-muted uppercase">Amend the branch</p>
+                            <p className="text-muted">
+                              Write a file inside the {task.zone} zone. The next run sees your commit.
+                            </p>
+                            <input
+                              required
+                              disabled={busy || project.paused}
+                              value={amendPath}
+                              onChange={(event) => setAmendPath(event.target.value)}
+                              placeholder="path/inside/zone.py"
+                              className="w-full border border-line bg-paper px-2 py-1 font-mono text-xs"
+                            />
+                            <textarea
+                              required
+                              disabled={busy || project.paused}
+                              value={amendContent}
+                              onChange={(event) => setAmendContent(event.target.value)}
+                              rows={6}
+                              placeholder="File contents"
+                              className="w-full border border-line bg-paper px-2 py-1 font-mono text-xs"
+                            />
+                            <input
+                              disabled={busy || project.paused}
+                              value={amendSummary}
+                              onChange={(event) => setAmendSummary(event.target.value)}
+                              placeholder="Short commit summary"
+                              className="w-full border border-line bg-paper px-2 py-1 text-sm"
+                            />
+                            <button
+                              type="submit"
+                              disabled={busy || project.paused || !amendPath.trim()}
+                              className="bg-ink px-3 py-2 text-sm text-paper"
+                            >
+                              Commit amendment
+                            </button>
+                          </form>
+                        ) : null}
                       </div>
                     ) : null}
                     {canReassign(task.state) ? (
@@ -1023,6 +1098,16 @@ function canReassign(state: string): boolean {
     state === "escalated" ||
     state === "failed" ||
     state === "changes_requested"
+  );
+}
+
+function canAmend(state: string): boolean {
+  return (
+    state === "ready" ||
+    state === "in_review" ||
+    state === "gated" ||
+    state === "changes_requested" ||
+    state === "escalated"
   );
 }
 

@@ -17,6 +17,7 @@ from app.schemas import (
     ProjectSnapshot,
     RequirementWrite,
     SpendCeilingUpdate,
+    TaskAmend,
     TaskDetailOut,
     TaskReassign,
     UntestableSubmit,
@@ -197,6 +198,22 @@ def get_task_detail(
     service: ExecutionService = Depends(get_executor),
 ) -> TaskDetailOut:
     return service.task_detail(project_id, task_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/amend", response_model=TaskDetailOut)
+def amend_task(
+    project_id: str,
+    task_id: str,
+    body: TaskAmend,
+    service: ExecutionService = Depends(get_executor),
+) -> TaskDetailOut:
+    return service.amend(
+        project_id,
+        task_id,
+        path=body.path,
+        content=body.content,
+        summary=body.summary,
+    )
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/review", response_model=ProjectSnapshot)
