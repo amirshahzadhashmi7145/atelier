@@ -43,13 +43,35 @@ class Workspace:
             path.write_text(content)
             self._git("add", "--", relative)
 
-    def commit_staged(self, key: str, summary: str) -> None:
+    def commit_staged(
+        self,
+        key: str,
+        summary: str,
+        *,
+        role: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
         message = f"{key}: {summary}".replace("\n", " ")
+        trailers: list[str] = []
+        if role:
+            trailers.append(f"Atelier-Agent: {role}")
+        if run_id:
+            trailers.append(f"Atelier-Run: {run_id}")
+        if trailers:
+            message = f"{message}\n\n" + "\n".join(trailers)
         self._git("commit", "-m", message)
 
-    def commit(self, key: str, summary: str, writes: list[tuple[str, str]]) -> None:
+    def commit(
+        self,
+        key: str,
+        summary: str,
+        writes: list[tuple[str, str]],
+        *,
+        role: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
         self.apply(writes)
-        self.commit_staged(key, summary)
+        self.commit_staged(key, summary, role=role, run_id=run_id)
 
     def discard(self) -> None:
         """Drop uncommitted changes so a failed check leaves no residue."""

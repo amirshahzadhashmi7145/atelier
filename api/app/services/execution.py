@@ -669,7 +669,9 @@ class ExecutionService:
                 rework=rework,
             )
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
-            self._record_run(project, task, result.provider, result.model, result.input_tokens, result.output_tokens)
+            run_id = self._record_run(
+                project, task, result.provider, result.model, result.input_tokens, result.output_tokens
+            )
             self._note_tokens(budget, result.input_tokens + result.output_tokens)
             parsed = self._parse(result.data)
             signature = tuple(sorted((item.path, item.content) for item in parsed.writes))
@@ -725,7 +727,7 @@ class ExecutionService:
                     + ". Declared tests must pass before a commit."
                 )
             try:
-                workspace.commit_staged(task.key, summary)
+                workspace.commit_staged(task.key, summary, role=task.zone, run_id=run_id)
             except RuntimeError as exc:
                 raise DomainError(f"The branch could not be committed: {exc}") from exc
             passed_checks = checks
@@ -932,7 +934,7 @@ class ExecutionService:
         *,
         role: str | None = None,
         purpose: str = "implement",
-    ) -> None:
+    ) -> str:
         actor = role or task.zone
         before = tokens_used(project.runs)
         run = AgentRun(
@@ -965,6 +967,7 @@ class ExecutionService:
         )
         after = before + int(input_tokens) + int(output_tokens)
         self.planning._alert_spend_thresholds(project, before=before, after=after)
+        return run.id
 
     def _replace_checks(self, project: Project, task: Task, checks: list[CheckResult]) -> None:
         self.session.execute(delete(CheckRun).where(CheckRun.task_id == task.id))

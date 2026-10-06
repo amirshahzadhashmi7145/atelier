@@ -23,6 +23,23 @@ def test_commit_happens_only_after_staging(tmp_path: Path):
     assert "TASK-001: add the app" in log
 
 
+def test_agent_commits_carry_role_and_run_trailers(tmp_path: Path):
+    workspace = Workspace(tmp_path)
+    workspace.ensure()
+    workspace.start_branch("task/TASK-001")
+    workspace.commit(
+        "TASK-001",
+        "add the app",
+        [("server/app.py", "print('hi')\n")],
+        role="backend",
+        run_id="run_abc123",
+    )
+    body = workspace._git("log", "-1", "--format=%B", "task/TASK-001")
+    assert "TASK-001: add the app" in body
+    assert "Atelier-Agent: backend" in body
+    assert "Atelier-Run: run_abc123" in body
+
+
 def test_rebase_onto_main_replays_the_branch(tmp_path: Path):
     workspace = Workspace(tmp_path)
     workspace.ensure()
