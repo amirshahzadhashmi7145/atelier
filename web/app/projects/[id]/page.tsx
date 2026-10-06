@@ -435,8 +435,14 @@ export default function ProjectPage() {
               committed and a pull request is opened. Review runs those commands again, then checks the
               acceptance criteria. A failing command sends the task back. A criterion the review cannot
               execute waits for you to waive it or send the task back. Accepting a passed review rebases
-              onto main, re-runs the checks, then merges and unblocks whatever was waiting.
+              onto main, re-runs the checks, then merges and unblocks whatever was waiting. After too many
+              failed attempts a task escalates and waits for you to resume it.
             </p>
+            {needsYou(snapshot).length > 0 ? (
+              <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
+                Needs you first: {needsYou(snapshot).join(" · ")}
+              </p>
+            ) : null}
             {can("run_ready") ? (
               <button
                 type="button"
@@ -463,7 +469,9 @@ export default function ProjectPage() {
               </p>
             ) : null}
             <ul className="mt-4 space-y-3">
-              {snapshot.tasks.map((task) => (
+              {[...snapshot.tasks]
+                .sort((left, right) => taskPriority(left.state) - taskPriority(right.state))
+                .map((task) => (
                 <li key={task.id} className="flex gap-4 border-t border-line pt-3">
                   <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${dotClass(task.state)}`} />
                   <div>
@@ -477,6 +485,18 @@ export default function ProjectPage() {
                       {task.depends_on.length ? ` · waits on ${task.depends_on.join(", ")}` : " · nothing blocks it"}
                       {task.branch_name ? ` · ${task.branch_name}` : ""}
                     </p>
+                    {task.state === "escalated" ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="mt-2 bg-oxide px-3 py-2 text-sm text-white"
+                        onClick={() =>
+                          run(() => api(`/api/projects/${project.id}/tasks/${task.id}/resume`, { method: "POST" }))
+                        }
+                      >
+                        Resume escalated task
+                      </button>
+                    ) : null}
                     {task.state === "in_review" ? (
                       <div className="mt-2 flex flex-wrap gap-3">
                         <button
@@ -615,6 +635,33 @@ function dotClass(state: string): string {
   if (state === "ready" || state === "done" || state === "gated") return "bg-moss";
   if (state === "blocked") return "bg-muted";
   return "bg-oxide";
+}
+
+function taskPriority(state: string): number {
+  if (state === "escalated") return 0;
+  if (state === "gated") return 1;
+  if (state === "in_review") return 2;
+  if (state === "ready") return 3;
+  if (state === "in_progress") return 4;
+  if (state === "blocked") return 5;
+  return 6;
+}
+
+function needsYou(snapshot: Snapshot): string[] {
+  const lines: string[] = [];
+  for (const task of snapshot.tasks) {
+    if (task.state === "escalated") {
+      lines.push(`${task.key} escalated`);
+    } else if (task.state === "gated") {
+      lines.push(`${task.key} awaiting merge`);
+    } else if (
+      task.state === "in_review" &&
+      snapshot.findings.some((finding) => finding.task_id === task.id && finding.result === "untestable")
+    ) {
+      lines.push(`${task.key} untestable`);
+    }
+  }
+  return lines;
 }
 
 function GateButtons({

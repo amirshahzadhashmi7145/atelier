@@ -154,6 +154,28 @@ def test_a_write_outside_the_zone_is_not_saved(tmp_path: Path):
     assert not (tmp_path / project_id / "web" / "nope.tsx").exists()
 
 
+def test_an_escalated_task_can_be_resumed_by_a_person(tmp_path: Path):
+    client = client_for(tmp_path, _OutsideZone())
+    project_id = _prepare(client)
+    for _ in range(3):
+        ran = client.post(f"/api/projects/{project_id}/tasks/run")
+        assert ran.status_code == 200, ran.text
+    body = ran.json()
+    task = _by_key(body, "TASK-001")
+    assert task["state"] == "escalated"
+    assert "resume_escalated" in body["project"]["next_actions"]
+    refused = client.post(f"/api/projects/{project_id}/tasks/{task['id']}/accept")
+    assert refused.status_code == 409
+    resumed = client.post(f"/api/projects/{project_id}/tasks/{task['id']}/resume")
+    assert resumed.status_code == 200, resumed.text
+    again = resumed.json()
+    assert _by_key(again, "TASK-001")["state"] == "ready"
+    assert _by_key(again, "TASK-001")["retry_count"] == 0
+    assert "resume_escalated" not in again["project"]["next_actions"]
+    assert "run_ready" in again["project"]["next_actions"]
+    assert any(event["type"] == "task.resumed" for event in again["events"])
+
+
 def test_a_run_that_never_finishes_is_stopped_by_the_iteration_budget(tmp_path: Path):
     client = client_for(tmp_path, _NeverDone(), run_max_iterations=2)
     project_id = _prepare(client)
