@@ -181,6 +181,18 @@ class RunOut(BaseModel):
     model: str
     input_tokens: int
     output_tokens: int
+    task_id: str | None = None
+
+
+class SpendByRoleOut(BaseModel):
+    role: str
+    tokens: int
+
+
+class SpendByTaskOut(BaseModel):
+    task_id: str
+    task_key: str
+    tokens: int
 
 
 class ProjectOut(BaseModel):
@@ -200,6 +212,8 @@ class ProjectOut(BaseModel):
     spend_ceiling_tokens: int
     spend_tokens: int
     spend_alerts: list[int] = []
+    spend_by_role: list[SpendByRoleOut] = []
+    spend_by_task: list[SpendByTaskOut] = []
     created_at: datetime
     next_actions: list[str]
     uncovered_requirement_keys: list[str]

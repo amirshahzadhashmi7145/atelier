@@ -211,6 +211,7 @@ class AgentRun(Base):
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     role: Mapped[str] = mapped_column(String(40))
     purpose: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(20))

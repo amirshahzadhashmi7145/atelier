@@ -73,6 +73,13 @@ def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):
     assert first["state"] == "in_review"
     assert first["branch_name"] == "task/TASK-001"
     assert _by_key(body, "TASK-002")["state"] == "blocked"
+    assert any(item["role"] == "backend" for item in body["project"]["spend_by_role"])
+    assert any(
+        item["task_key"] == "TASK-001" and item["tokens"] > 0
+        for item in body["project"]["spend_by_task"]
+    )
+    task_run = next(item for item in body["runs"] if item["task_id"] == first["id"])
+    assert task_run["role"] == "backend"
     written = tmp_path / project_id / "server" / "app.py"
     assert "create_record" in written.read_text()
     pr = next(item for item in body["pull_requests"] if item["task_id"] == first["id"])

@@ -78,6 +78,8 @@ export default function ProjectPage() {
   const spendCeiling = project.spend_ceiling_tokens ?? 0;
   const spendAlerts = project.spend_alerts ?? [];
   const highestAlert = spendAlerts.length ? Math.max(...spendAlerts) : 0;
+  const spendByRole = project.spend_by_role ?? [];
+  const spendByTask = project.spend_by_task ?? [];
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
@@ -110,6 +112,18 @@ export default function ProjectPage() {
             Spend: {spendTokens.toLocaleString()} / {spendCeiling.toLocaleString()} tokens
             {highestAlert ? ` · alerted at ${spendAlerts.map((n) => `${n}%`).join(", ")}` : ""}
           </p>
+          {spendByRole.length ? (
+            <p className="mt-1 text-sm text-muted">
+              By role:{" "}
+              {spendByRole.map((item) => `${item.role} ${item.tokens.toLocaleString()}`).join(" · ")}
+            </p>
+          ) : null}
+          {spendByTask.length ? (
+            <p className="mt-1 text-sm text-muted">
+              By task:{" "}
+              {spendByTask.map((item) => `${item.task_key} ${item.tokens.toLocaleString()}`).join(" · ")}
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap items-end gap-3">
             {can("pause") ? (
               <button

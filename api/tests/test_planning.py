@@ -53,6 +53,17 @@ def test_a_paused_project_blocks_planning_steps():
     assert interpreted.status_code == 200
 
 
+def test_planning_spend_is_broken_down_by_role():
+    client = client_for()
+    project_id = _create(client)
+    interpreted = client.post(f"/api/projects/{project_id}/interpret")
+    assert interpreted.status_code == 200, interpreted.text
+    body = interpreted.json()
+    assert body["project"]["spend_by_role"] == [{"role": "pm", "tokens": 50}]
+    assert body["project"]["spend_by_task"] == []
+    assert body["runs"][0]["task_id"] is None
+
+
 def test_hitting_the_spend_ceiling_pauses_the_project():
     client = client_for()
     created = client.post(
