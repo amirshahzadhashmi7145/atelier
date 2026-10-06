@@ -23,6 +23,13 @@ from app.domain.gates import (
     normalize_gate_policy,
     require_automation_acknowledgement,
 )
+from app.domain.status import (
+    agent_states,
+    blocked_with_blockers,
+    needs_you,
+    open_gates,
+    task_counts,
+)
 from app.domain.graph import require_acyclic
 from app.domain.plan_stage import PlanStage, next_actions, transition
 from app.domain.spend import (
@@ -56,7 +63,9 @@ from app.models import (
     utcnow,
 )
 from app.schemas import (
+    AgentStatusOut,
     AssumptionOut,
+    BlockedTaskOut,
     ClarificationOut,
     CheckOut,
     CriterionOut,
@@ -70,6 +79,7 @@ from app.schemas import (
     ProjectListItem,
     ProjectOut,
     ProjectSnapshot,
+    ProjectStatusOut,
     RequirementOut,
     RequirementWrite,
     RunOut,
@@ -333,6 +343,25 @@ class PlanningService:
             uncovered = []
         spent = tokens_used(project.runs)
         estimate = sum(int(task.estimate_tokens or 0) for task in tasks)
+        actions = _actions(project.stage, tasks, paused=bool(project.paused))
+        gate_list = open_gates(next_actions=actions, tasks=tasks)
+        status = ProjectStatusOut(
+            task_counts=task_counts(tasks),
+            blocked=[
+                BlockedTaskOut(task_key=key, blocked_by=blockers)
+                for key, blockers in blocked_with_blockers(tasks)
+            ],
+            open_gates=gate_list,
+            agents=[
+                AgentStatusOut(role=role, state=state)
+                for role, state in agent_states(stage=project.stage, tasks=tasks)
+            ],
+            needs_you=needs_you(
+                open_gate_list=gate_list,
+                tasks=tasks,
+                findings=project.findings,
+            ),
+        )
         return ProjectSnapshot(
             project=ProjectOut(
                 id=project.id,
@@ -369,8 +398,9 @@ class PlanningService:
                     margin=self.settings.spend_estimate_margin,
                 ),
                 gate_policy=normalize_gate_policy(project.gate_policy),
+                status=status,
                 created_at=project.created_at,
-                next_actions=_actions(project.stage, tasks, paused=bool(project.paused)),
+                next_actions=actions,
                 uncovered_requirement_keys=uncovered,
             ),
             clarifications=[
