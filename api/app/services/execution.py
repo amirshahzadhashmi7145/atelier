@@ -20,6 +20,7 @@ from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
 from app.domain.ac_evidence import blob_from_test_writes, evidence_gaps
 from app.domain.dependencies import dependency_files, forbidden_dependency_sources
+from app.domain.preserve import missing_from_rewrites
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
@@ -837,6 +838,7 @@ class ExecutionService:
                 requirements=requirements_text,
                 rework=rework,
                 workspace_tree=self._workspace_tree(workspace.root),
+                existing_sources=self._existing_sources(workspace.root, task.zone, rules),
             )
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
             run_id = self._record_run(
@@ -861,7 +863,6 @@ class ExecutionService:
                 )
             elif signature == previous:
                 raise DomainError("The agent repeated the same change. The run was stopped.")
-            previous = signature
             for item in parsed.writes:
                 require_inside_zone(item.path, task.zone, rules)
             if not parsed.done:
@@ -893,6 +894,18 @@ class ExecutionService:
                     + " ".join(blocked_deps),
                     status_code=422,
                 )
+            clobbered = missing_from_rewrites(workspace.root, writes)
+            if clobbered:
+                # Ask again in this run — do not burn a task retry on a clobber.
+                rework = (
+                    "Your last write dropped symbols still required by earlier tasks:\n"
+                    + "\n".join(clobbered)
+                    + "\nCopy the existing file forward, keep those names, then add only "
+                    "this task's endpoint and tests.\n"
+                    + (rework or "")
+                )
+                continue
+            previous = signature
             try:
                 workspace.apply(writes)
             except RuntimeError as exc:
@@ -1537,6 +1550,55 @@ class ExecutionService:
                 lines.append("…")
                 break
         return "\n".join(lines)
+
+    def _existing_sources(
+        self,
+        root: Path,
+        zone: str,
+        rules: list[tuple[str, str]],
+        *,
+        max_files: int = 12,
+        max_chars: int = 24000,
+    ) -> str:
+        """Inline zone source so the model extends files instead of inventing blanks."""
+
+        from app.domain.zones import zone_for
+
+        skip = {".git", ".deps", "node_modules", "__pycache__", ".venv", "venv"}
+        chunks: list[str] = []
+        used = 0
+        count = 0
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.suffix not in {".py", ".ts", ".tsx", ".js", ".jsx"}:
+                continue
+            if any(part in skip for part in path.parts):
+                continue
+            relative = path.relative_to(root).as_posix()
+            owner = zone_for(relative, rules)
+            # This zone's files + shared tests (often owned by backend).
+            if relative.startswith("tests/"):
+                pass
+            elif owner == zone:
+                pass
+            else:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if len(text) > 8000:
+                text = text[:8000] + "\n…\n"
+            block = f"----- {relative} -----\n{text}"
+            if used + len(block) > max_chars:
+                break
+            chunks.append(block)
+            used += len(block)
+            count += 1
+            if count >= max_files:
+                break
+        return "\n\n".join(chunks)
 
     def _root(self, project: Project) -> Path:
         return Path(self.settings.workspaces_dir) / project.id

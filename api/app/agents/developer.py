@@ -17,6 +17,7 @@ def implement_prompt(
     requirements: str = "",
     rework: str = "",
     workspace_tree: str = "",
+    existing_sources: str = "",
 ) -> tuple[str, str]:
     system = (
         "You are the "
@@ -42,6 +43,10 @@ def implement_prompt(
         "response fields from the criteria so the review can mark them pass. "
         "Keep existing passing harness or feature tests; extend them for this task's "
         "criteria instead of deleting them. "
+        "CRITICAL: never rewrite an existing module from scratch. Start from the file "
+        "contents provided below, keep every existing endpoint/helper/export (including "
+        "test helpers like reset_store), and only ADD your task's code and tests. "
+        "The full suite still runs — breaking earlier tasks fails this run. "
         "On the first implementation that introduces tests, also write the manifests the "
         "architecture's commands need: requirements.txt (include pytest when using "
         "python -m pytest) and/or package.json with a working test script when using npm. "
@@ -66,6 +71,11 @@ def implement_prompt(
     user += f"\nOwnership:\n{ownership}"
     if workspace_tree.strip():
         user += "\n\nCurrent branch files (read-only context):\n" + workspace_tree.strip()
+    if existing_sources.strip():
+        user += (
+            "\n\nExisting source to extend (copy forward, then add your changes):\n"
+            + existing_sources.strip()
+        )
     if rework.strip():
         user += "\n\nPrevious review failed:\n" + rework.strip()
     return system, user
