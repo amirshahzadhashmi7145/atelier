@@ -102,17 +102,20 @@ def _run_sandboxed(
         # Sandbox drops CAP_DAC_OVERRIDE — host-private (0700) dirs are invisible inside Docker.
         _relax_tree_permissions(work)
         install_timeout = max(timeout, 120)
-        prep = _prepare_dependencies(work, planned, sandbox, install_timeout)
-        if prep is not None and prep.exit_code != 0:
-            # Surface install / layout failure on every tier so review has a clear signal.
+        blocked, hard_fail = _prepare_dependencies(work, planned, sandbox, install_timeout)
+        if hard_fail is not None:
+            # Pip/npm install failure blocks every tier — nothing useful can run.
             return [
-                CheckResult(tier, command, prep.exit_code, prep.excerpt)
+                CheckResult(tier, command, hard_fail.exit_code, hard_fail.excerpt)
                 for tier, command in planned
             ]
-        return [
-            _run_sandbox_command(work, tier, command, timeout, sandbox)
-            for tier, command in planned
-        ]
+        results: list[CheckResult] = []
+        for tier, command in planned:
+            if tier in blocked:
+                results.append(blocked[tier])
+            else:
+                results.append(_run_sandbox_command(work, tier, command, timeout, sandbox))
+        return results
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -129,10 +132,13 @@ def _prepare_dependencies(
     planned: list[tuple[str, str]],
     sandbox: SandboxOptions,
     timeout: int,
-) -> CheckResult | None:
+) -> tuple[dict[str, CheckResult], CheckResult | None]:
+    """Install deps. Missing package.json fails only npm/node tiers; pip still runs."""
+
     commands = [command for _tier, command in planned]
-    if _commands_need_node(commands) and not _package_json_present(root):
-        return CheckResult(
+    blocked: dict[str, CheckResult] = {}
+    if not _package_json_present(root):
+        missing = CheckResult(
             "deps",
             "npm",
             1,
@@ -140,29 +146,42 @@ def _prepare_dependencies(
             "at the repo root (or under a path npm --prefix can reach). Add package.json "
             "with a test script, or change the ui command to match the tree.",
         )
+        for tier, command in planned:
+            program = Path(parse_command(command)[0]).name.lower()
+            if program in _NODE_PROGRAMS:
+                blocked[tier] = CheckResult(tier, command, missing.exit_code, missing.excerpt)
 
-    for prefix in _npm_install_prefixes(root):
-        argv = ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"]
-        if prefix:
-            argv = ["npm", "--prefix", prefix, "install", "--ignore-scripts", "--no-audit", "--no-fund"]
-        code, excerpt = run_in_sandbox(
-            root,
-            argv,
-            image=sandbox.node_image,
-            timeout=timeout,
-            memory=sandbox.memory,
-            cpus=sandbox.cpus,
-            pids_limit=sandbox.pids_limit,
-            network=True,
-            writable=True,
-        )
-        if code != 0:
-            return CheckResult(
-                "deps",
-                " ".join(argv),
-                code,
-                excerpt or "npm install failed.",
+    if _package_json_present(root):
+        for prefix in _npm_install_prefixes(root):
+            argv = ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"]
+            if prefix:
+                argv = [
+                    "npm",
+                    "--prefix",
+                    prefix,
+                    "install",
+                    "--ignore-scripts",
+                    "--no-audit",
+                    "--no-fund",
+                ]
+            code, excerpt = run_in_sandbox(
+                root,
+                argv,
+                image=sandbox.node_image,
+                timeout=timeout,
+                memory=sandbox.memory,
+                cpus=sandbox.cpus,
+                pids_limit=sandbox.pids_limit,
+                network=True,
+                writable=True,
             )
+            if code != 0:
+                return {}, CheckResult(
+                    "deps",
+                    " ".join(argv),
+                    code,
+                    excerpt or "npm install failed.",
+                )
 
     pip_argv = _pip_install_argv(root, commands)
     if pip_argv:
@@ -178,16 +197,10 @@ def _prepare_dependencies(
             writable=True,
         )
         if code != 0:
-            return CheckResult("deps", " ".join(pip_argv), code, excerpt or "pip install failed.")
-    return None
-
-
-def _commands_need_node(commands: list[str]) -> bool:
-    for command in commands:
-        program = Path(parse_command(command)[0]).name.lower()
-        if program in _NODE_PROGRAMS:
-            return True
-    return False
+            return blocked, CheckResult(
+                "deps", " ".join(pip_argv), code, excerpt or "pip install failed."
+            )
+    return blocked, None
 
 
 def _commands_need_pytest(commands: list[str]) -> bool:

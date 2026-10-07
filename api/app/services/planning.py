@@ -1152,6 +1152,8 @@ class PlanningService:
         if decision == "approved" and gate == "requirements":
             self._move(project, PlanStage.REQUIREMENTS_APPROVED)
         elif decision == "approved" and gate == "architecture":
+            self._augment_ownership_for_tests(project)
+            self._scaffold_workspace(project)
             self._move(project, PlanStage.ARCHITECTURE_APPROVED)
         else:
             project.updated_at = utcnow()
@@ -1390,6 +1392,51 @@ class PlanningService:
         from app.domain.test_strategy import validate_test_strategy
 
         validate_test_strategy(strategy)
+
+    def _augment_ownership_for_tests(self, project: Project) -> None:
+        """Let engineers maintain harness paths the architecture's commands name."""
+
+        from app.services.scaffold import ensure_test_ownership
+
+        current = [(rule.glob, rule.zone) for rule in project.ownership]
+        strategy = project.test_strategy or {}
+        desired = ensure_test_ownership(current, strategy)
+        existing_globs = {rule.glob for rule in project.ownership}
+        for pattern, zone in desired:
+            if pattern in existing_globs:
+                continue
+            project.ownership.append(
+                OwnershipRule(id=new_id("own"), project_id=project.id, glob=pattern, zone=zone)
+            )
+            existing_globs.add(pattern)
+        self.session.flush()
+
+    def _scaffold_workspace(self, project: Project) -> None:
+        """Commit zone folders + manifests so sandbox checks can run on day one."""
+
+        from pathlib import Path
+
+        from app.services.scaffold import apply_scaffold
+        from app.services.workspace import Workspace
+
+        ownership = [(rule.glob, rule.zone) for rule in project.ownership]
+        strategy = dict(project.test_strategy or {})
+        root = Path(self.settings.workspaces_dir) / project.id
+        try:
+            written = apply_scaffold(Workspace(root), ownership, strategy)
+        except RuntimeError as exc:
+            raise DomainError(f"The workspace could not be scaffolded: {exc}") from exc
+        if not written:
+            return
+        self._event(
+            project,
+            "workspace.scaffolded",
+            actor_kind="system",
+            payload={
+                "paths": written,
+                "summary": f"Seeded {len(written)} harness file(s) on main.",
+            },
+        )
 
     def _transcript(self, project: Project) -> str:
         lines = [

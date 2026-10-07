@@ -39,6 +39,7 @@ _ARTEFACTS = {
     "interpretation.edited",
     "assumption.recorded",
     "plan.stage_changed",
+    "workspace.scaffolded",
 }
 
 _OUTCOMES = {

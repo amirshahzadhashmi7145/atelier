@@ -18,6 +18,7 @@ from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
+from app.domain.ac_evidence import blob_from_test_writes, evidence_gaps
 from app.domain.dependencies import dependency_files, forbidden_dependency_sources
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
@@ -835,6 +836,7 @@ class ExecutionService:
                 ownership=ownership,
                 requirements=requirements_text,
                 rework=rework,
+                workspace_tree=self._workspace_tree(workspace.root),
             )
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
             run_id = self._record_run(
@@ -931,6 +933,49 @@ class ExecutionService:
                     "; ".join(f"{item.tier} exited {item.exit_code}" for item in failed_checks)
                     + ". Declared tests must pass before a commit."
                 )
+            # Green harnesses are not enough — excerpts/tests must name AC signals.
+            try:
+                criteria_rows = self._criteria(project, task)
+            except DomainError:
+                criteria_rows = []
+            if criteria_rows:
+                corpus_checks = "\n".join(
+                    f"{item.tier}\n{item.excerpt}" for item in checks
+                )
+                on_disk = []
+                for path in workspace.root.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    rel = path.relative_to(workspace.root).as_posix()
+                    if any(
+                        part in {".git", ".deps", "node_modules", "__pycache__"}
+                        for part in path.parts
+                    ):
+                        continue
+                    try:
+                        on_disk.append((rel, path.read_text(encoding="utf-8")))
+                    except OSError:
+                        continue
+                gaps = evidence_gaps(
+                    criteria_rows,
+                    check_excerpts=corpus_checks,
+                    write_contents=blob_from_test_writes(writes)
+                    + "\n"
+                    + blob_from_test_writes(on_disk),
+                )
+                if gaps:
+                    try:
+                        workspace.discard()
+                    except RuntimeError as exc:
+                        raise DomainError(
+                            f"The failed change could not be discarded: {exc}"
+                        ) from exc
+                    raise DomainError(
+                        "Tests pass but do not evidence "
+                        + ", ".join(gaps)
+                        + ". Assert the status codes and response fields from those "
+                        "criteria in unit/integration/ui tests, then try again."
+                    )
             try:
                 workspace.commit_staged(task.key, summary, role=task.zone, run_id=run_id)
             except RuntimeError as exc:
@@ -1475,6 +1520,23 @@ class ExecutionService:
             if task.id == task_id:
                 return task
         raise DomainError("Task not found.", status_code=404)
+
+    def _workspace_tree(self, root: Path, *, limit: int = 80) -> str:
+        """List tracked-ish source files so the agent sees what already exists."""
+
+        skip = {".git", ".deps", "node_modules", "__pycache__", ".venv", "venv"}
+        lines: list[str] = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            if any(part in skip for part in path.parts):
+                continue
+            relative = path.relative_to(root).as_posix()
+            lines.append(relative)
+            if len(lines) >= limit:
+                lines.append("…")
+                break
+        return "\n".join(lines)
 
     def _root(self, project: Project) -> Path:
         return Path(self.settings.workspaces_dir) / project.id
