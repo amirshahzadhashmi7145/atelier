@@ -5,6 +5,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { loadProjects, postProject } from "@/lib/api";
 import type { ProjectListItem } from "@/lib/types";
+import { planProgressPct, planStepIndex, PLAN_STEPS } from "@/lib/progress";
+import {
+  BusyButton,
+  EmptyHint,
+  LiveDot,
+  ProgressBar,
+  Skeleton,
+  Spinner,
+} from "@/components/ui/feedback";
 
 export default function HomePage() {
   const router = useRouter();
@@ -45,39 +54,55 @@ export default function HomePage() {
   }
 
   return (
-    <main className="relative overflow-hidden">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[70vh] bg-[radial-gradient(ellipse_at_20%_0%,#efe2d0_0%,transparent_55%),radial-gradient(ellipse_at_90%_10%,#dfe8d4_0%,transparent_40%)]" />
+    <main className="atelier-shell relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[72vh] bg-[radial-gradient(ellipse_at_18%_0%,#efe2d0_0%,transparent_55%),radial-gradient(ellipse_at_92%_8%,#dfe8d4_0%,transparent_42%),linear-gradient(180deg,rgba(255,248,239,0.65),transparent_50%)]" />
+      <div className="pointer-events-none absolute -right-24 top-40 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(154,52,18,0.08),transparent_70%)]" />
 
-      <section className="relative mx-auto grid max-w-6xl gap-12 px-6 pb-8 pt-14 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+      <div className="relative mx-auto max-w-6xl px-6 pt-6">
+        <nav className="atelier-nav">
+          <Link href="/" className="atelier-brand">
+            Atelier<span>.</span>
+          </Link>
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <LiveDot live={loaded} label={loaded ? "Ready" : "Loading"} />
+            <Link href="/office" className="text-muted transition hover:text-ink">
+              Coders Alley
+            </Link>
+            <a href="#start" className="ui-btn bg-ink px-4 py-2 text-sm text-paper">
+              Start a project
+            </a>
+          </div>
+        </nav>
+      </div>
+
+      <section className="relative mx-auto grid max-w-6xl gap-12 px-6 pb-10 pt-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
         <div>
-          <p className="text-xs tracking-[0.28em] text-oxide uppercase">Atelier</p>
-          <h1 className="font-serif mt-4 max-w-xl text-5xl leading-[0.95] md:text-6xl">
-            Describe it.
-            <span className="block text-muted">Watch the team build.</span>
+          <h1 className="font-serif text-6xl leading-[0.92] tracking-tight md:text-7xl">
+            Atelier
           </h1>
-          <p className="mt-5 max-w-lg text-lg leading-relaxed text-muted">
+          <p className="font-serif mt-4 max-w-xl text-2xl leading-snug text-muted md:text-3xl">
+            Describe it. Watch the team build.
+          </p>
+          <p className="mt-5 max-w-lg text-base leading-relaxed text-muted md:text-lg">
             PM plans. Engineers take desks by zone. Staff reviews every branch. QA judges criteria.
-            You approve the gates that matter.
+            You approve the gates that matter — with live status the whole way.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
-              href="#start"
-              className="bg-ink px-5 py-2.5 text-sm text-paper transition hover:bg-[#2c261f]"
-            >
+            <a href="#start" className="ui-btn bg-ink px-5 py-2.5 text-sm text-paper hover:bg-[#2c261f]">
               Start a project
             </a>
             <Link
               href="/office"
-              className="border border-ink/20 bg-white/50 px-5 py-2.5 text-sm transition hover:border-ink/40"
+              className="ui-btn border border-ink/20 bg-white/55 px-5 py-2.5 text-sm backdrop-blur-sm hover:border-ink/40"
             >
-              Coders Alley
+              Open Coders Alley
             </Link>
           </div>
         </div>
 
         <Link
           href="/office"
-          className="group relative block aspect-[5/4] overflow-hidden border border-line bg-[#cbb89a] transition"
+          className="group relative block aspect-[5/4] overflow-hidden border border-line bg-[#cbb89a] shadow-[0_28px_50px_-32px_rgba(28,25,21,0.65)] transition duration-300 hover:-translate-y-1"
           aria-label="Open Coders Alley"
         >
           <div className="absolute inset-0 opacity-90 office-mini">
@@ -89,25 +114,30 @@ export default function HomePage() {
             <span className="absolute right-[24%] top-[30%] h-3 w-3 rounded-full bg-oxide" />
             <span className="absolute bottom-[30%] left-[48%] h-3 w-3 rounded-full bg-muted" />
           </div>
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#1c1915]/70 to-transparent px-4 py-4">
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#1c1915]/75 to-transparent px-4 py-4">
             <p className="text-xs uppercase tracking-[0.22em] text-[#f3efe6]/80">Live mezzanine</p>
             <p className="font-serif text-2xl text-paper">Coders Alley</p>
           </div>
         </Link>
       </section>
 
-      <section id="start" className="relative mx-auto max-w-6xl px-6 pb-20 pt-6">
-        <div className="grid gap-10 lg:grid-cols-[1fr_0.9fr]">
-          <form onSubmit={onSubmit} className="space-y-4 border border-line bg-white/55 p-6 backdrop-blur-sm">
-            <h2 className="font-serif text-3xl">Start a project</h2>
+      <section id="start" className="relative mx-auto max-w-6xl px-6 pb-20 pt-4">
+        <div className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr]">
+          <form onSubmit={onSubmit} className="ui-panel space-y-4 p-6 md:p-7">
+            <div className="ui-panel-header">
+              <h2 className="font-serif text-3xl">Start a project</h2>
+              {busy ? <LiveDot live label="Creating" /> : null}
+            </div>
+            {busy ? <ProgressBar indeterminate tone="oxide" label="Preparing the workshop" detail="Hang tight" /> : null}
             <label className="block text-sm">
               Name
               <input
                 required
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                className="mt-1 w-full border border-line bg-paper px-3 py-2"
+                className="mt-1 w-full border border-line bg-paper/80 px-3 py-2.5 outline-none transition focus:border-ink/35"
                 placeholder="Task manager"
+                disabled={busy}
               />
             </label>
             <label className="block text-sm">
@@ -117,8 +147,9 @@ export default function HomePage() {
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 rows={5}
-                className="mt-1 w-full border border-line bg-paper px-3 py-2"
+                className="mt-1 w-full border border-line bg-paper/80 px-3 py-2.5 outline-none transition focus:border-ink/35"
                 placeholder="A task manager with email login, projects, assignment, and due dates."
+                disabled={busy}
               />
             </label>
             <label className="block text-sm">
@@ -126,8 +157,9 @@ export default function HomePage() {
               <input
                 value={githubRepo}
                 onChange={(event) => setGithubRepo(event.target.value)}
-                className="mt-1 w-full border border-line bg-paper px-3 py-2"
+                className="mt-1 w-full border border-line bg-paper/80 px-3 py-2.5 outline-none transition focus:border-ink/35"
                 placeholder="acme/notes"
+                disabled={busy}
               />
             </label>
             <label className="flex items-start gap-3 text-sm">
@@ -136,6 +168,7 @@ export default function HomePage() {
                 checked={createGithubRepo}
                 onChange={(event) => setCreateGithubRepo(event.target.checked)}
                 className="mt-1"
+                disabled={busy}
               />
               <span>
                 Create GitHub repository if missing
@@ -149,43 +182,76 @@ export default function HomePage() {
               <input
                 value={tech}
                 onChange={(event) => setTech(event.target.value)}
-                className="mt-1 w-full border border-line bg-paper px-3 py-2"
+                className="mt-1 w-full border border-line bg-paper/80 px-3 py-2.5 outline-none transition focus:border-ink/35"
                 placeholder="TypeScript, Python"
+                disabled={busy}
               />
             </label>
             {error ? <p className="text-sm text-oxide">{error}</p> : null}
-            <button type="submit" disabled={busy} className="bg-ink px-4 py-2 text-sm text-paper">
-              {busy ? "Creating…" : "Start a project"}
-            </button>
+            <BusyButton
+              type="submit"
+              busy={busy}
+              busyLabel="Creating project…"
+              className="bg-ink px-4 py-2.5 text-sm text-paper hover:bg-[#2c261f]"
+            >
+              Start a project
+            </BusyButton>
           </form>
 
           <section>
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="font-serif text-3xl">Projects</h2>
               <Link href="/office" className="text-sm text-oxide underline-offset-4 hover:underline">
-                Coders Alley
+                Watch the floor
               </Link>
             </div>
+
             {!loaded ? (
-              <p className="mt-3 text-sm text-muted">Loading projects…</p>
-            ) : projects.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">None yet — start one and watch the desks wake up.</p>
-            ) : (
-              <ul className="mt-4 divide-y divide-line border-y border-line">
-                {projects.map((project) => (
-                  <li key={project.id} className="flex items-center justify-between gap-3 py-3">
-                    <Link href={`/projects/${project.id}`} className="min-w-0 flex-1">
-                      <span className="block truncate">{project.name}</span>
-                      <span className="text-sm text-muted">{project.stage.replaceAll("_", " ")}</span>
-                    </Link>
-                    <Link
-                      href="/office"
-                      className="shrink-0 text-sm text-oxide underline-offset-4 hover:underline"
-                    >
-                      Watch
-                    </Link>
-                  </li>
+              <div className="mt-5 space-y-3" aria-busy>
+                <div className="flex items-center gap-2 text-sm text-muted">
+                  <Spinner /> Loading projects…
+                </div>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="ui-panel space-y-3 p-4">
+                    <Skeleton className="h-4 w-2/5" />
+                    <Skeleton className="h-3 w-1/3" />
+                    <Skeleton className="h-2 w-full" />
+                  </div>
                 ))}
+              </div>
+            ) : projects.length === 0 ? (
+              <EmptyHint>None yet — start one and watch the desks wake up.</EmptyHint>
+            ) : (
+              <ul className="mt-5 space-y-3">
+                {projects.map((project) => {
+                  const pct = planProgressPct(project.stage);
+                  const step = PLAN_STEPS[planStepIndex(project.stage)]?.label ?? project.stage;
+                  return (
+                    <li key={project.id}>
+                      <Link href={`/projects/${project.id}`} className="ui-project-card">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{project.name}</p>
+                            <p className="mt-0.5 text-sm text-muted">
+                              {step}
+                              <span className="text-muted/70"> · {project.stage.replaceAll("_", " ")}</span>
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-oxide">
+                            Open
+                          </span>
+                        </div>
+                        <div className="mt-3">
+                          <ProgressBar
+                            value={pct}
+                            tone={pct >= 100 ? "moss" : "ink"}
+                            detail={`${pct}%`}
+                          />
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

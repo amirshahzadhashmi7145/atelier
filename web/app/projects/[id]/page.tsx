@@ -3,9 +3,18 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { RunPipeline, StageProgress } from "@/components/RunPipeline";
+import { RunPipeline } from "@/components/RunPipeline";
 import { api, loadProject, loadTaskDetail } from "@/lib/api";
 import type { Requirement, Snapshot, TaskDetail } from "@/lib/types";
+import {
+  BusyButton,
+  LiveDot,
+  PageLoader,
+  ProgressBar,
+  Spinner,
+  WorkingBanner,
+} from "@/components/ui/feedback";
+import { planProgressPct, spendProgress, taskProgress } from "@/lib/progress";
 
 const RAIL = [
   { label: "Intake", hint: "The request, in your words", match: (stage: string) => stage === "intake" },
@@ -190,7 +199,7 @@ export default function ProjectPage() {
   }
 
   if (!snapshot) {
-    return <main className="mx-auto max-w-5xl px-6 py-16">{error || "Loading the project…"}</main>;
+    return <PageLoader label={error || "Loading the project…"} />;
   }
 
   const { project } = snapshot;
@@ -216,12 +225,19 @@ export default function ProjectPage() {
   // Touch clock so the sync label re-renders every second.
   void clock;
   const liveLabel = syncLabel(syncedAt);
+  const planPct = planProgressPct(project.stage);
+  const tasks = taskProgress(status.task_counts);
+  const spendPct = spendProgress(spendTokens, spendCeiling);
+  const spendTone = spendPct >= 80 ? "oxide" : spendPct >= 50 ? "amber" : "moss";
+  const isLive = syncedAt != null && Date.now() - syncedAt < 2500;
 
   return (
-    <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
+    <main className="atelier-shell">
+      <WorkingBanner show={busy || detailBusy} label={detailBusy ? "Loading task detail…" : "Working on that…"} />
+      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-8 lg:grid-cols-[15rem_1fr]">
       <aside>
-        <Link href="/" className="text-xs tracking-[0.22em] text-oxide uppercase">
-          Atelier
+        <Link href="/" className="atelier-brand text-[1.35rem]">
+          Atelier<span>.</span>
         </Link>
         <Link
           href="/office"
@@ -229,17 +245,31 @@ export default function ProjectPage() {
         >
           Coders Alley
         </Link>
-        <div className="mt-8">
-          <StageProgress
-            stages={RAIL.map(({ label, hint }) => ({ label, hint }))}
-            current={Math.max(0, current)}
-          />
+        <div className="mt-6">
+          <ProgressBar value={planPct} tone="moss" label="Pipeline" detail={`${planPct}%`} />
         </div>
+        <ol className="mt-6 space-y-5">
+          {RAIL.map((step, index) => (
+            <li
+              key={step.label}
+              className={`ui-rail-step ${index < current ? "is-done text-muted" : index === current ? "is-now text-ink" : "text-muted"}`}
+            >
+              <p className="text-xs tracking-widest uppercase">
+                {index < current ? "Done" : index === current ? "Now" : "Later"}
+              </p>
+              <p className="font-serif text-xl">{step.label}</p>
+              <p className="text-sm">{step.hint}</p>
+            </li>
+          ))}
+        </ol>
       </aside>
 
       <div className="space-y-8">
         <header>
-          <h1 className="font-serif text-4xl">{project.name}</h1>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h1 className="font-serif text-4xl tracking-tight">{project.name}</h1>
+            <LiveDot live={isLive} label={liveLabel} />
+          </div>
           <p className="mt-2 max-w-2xl text-muted">{project.description}</p>
           {project.tech_preferences ? (
             <p className="mt-2 text-sm text-muted">Preferences: {project.tech_preferences}</p>
@@ -257,22 +287,24 @@ export default function ProjectPage() {
                   {project.github_repo}
                 </a>
               </p>
-              <button
+              <BusyButton
                 type="button"
-                disabled={busy}
+                busy={busy}
+                busyLabel="Pushing…"
                 className="border border-ink px-3 py-2 text-sm"
                 onClick={() =>
                   run(() => api(`/api/projects/${project.id}/github-sync`, { method: "POST" }))
                 }
               >
                 Push latest to GitHub
-              </button>
+              </BusyButton>
             </div>
           ) : (
             <div className="mt-3">
-              <button
+              <BusyButton
                 type="button"
-                disabled={busy}
+                busy={busy}
+                busyLabel="Creating repo…"
                 className="border border-ink px-3 py-2 text-sm"
                 onClick={() =>
                   run(() =>
@@ -284,71 +316,88 @@ export default function ProjectPage() {
                 }
               >
                 Create GitHub repository
-              </button>
+              </BusyButton>
               <p className="mt-1 text-sm text-muted">
                 No remote yet — creates a public repo from the project name using GITHUB_TOKEN.
               </p>
             </div>
           )}
-          <p className="mt-2 text-sm text-muted">
-            Spend: {spendTokens.toLocaleString()} / {spendCeiling.toLocaleString()} tokens
-            {estimateTokens
-              ? ` · plan estimate ${estimateTokens.toLocaleString()}`
-              : ""}
-            {highestAlert ? ` · alerted at ${spendAlerts.map((n) => `${n}%`).join(", ")}` : ""}
-          </p>
-          {spendByRole.length ? (
-            <p className="mt-1 text-sm text-muted">
-              By role:{" "}
-              {spendByRole.map((item) => `${item.role} ${item.tokens.toLocaleString()}`).join(" · ")}
-            </p>
-          ) : null}
-          {spendByTask.length ? (
-            <p className="mt-1 text-sm text-muted">
-              By task:{" "}
-              {spendByTask.map((item) => `${item.task_key} ${item.tokens.toLocaleString()}`).join(" · ")}
-            </p>
-          ) : null}
+          <div className="ui-panel mt-5 grid gap-4 p-4 sm:grid-cols-2">
+            <ProgressBar
+              value={spendPct}
+              tone={spendTone}
+              label="Spend"
+              detail={`${spendTokens.toLocaleString()} / ${spendCeiling.toLocaleString()} tokens`}
+            />
+            <ProgressBar
+              value={tasks.total ? tasks.pct : planPct}
+              tone={tasks.pct >= 100 ? "moss" : "ink"}
+              label={tasks.total ? "Tasks done" : "Plan progress"}
+              detail={
+                tasks.total
+                  ? `${tasks.done}/${tasks.total}${tasks.active ? ` · ${tasks.active} active` : ""}`
+                  : `${planPct}% through planning`
+              }
+            />
+            {estimateTokens ? (
+              <p className="text-xs text-muted sm:col-span-2">
+                Plan estimate {estimateTokens.toLocaleString()} tokens
+                {highestAlert ? ` · alerted at ${spendAlerts.map((n) => `${n}%`).join(", ")}` : ""}
+              </p>
+            ) : null}
+            {spendByRole.length ? (
+              <p className="text-xs text-muted sm:col-span-2">
+                By role:{" "}
+                {spendByRole.map((item) => `${item.role} ${item.tokens.toLocaleString()}`).join(" · ")}
+              </p>
+            ) : null}
+            {spendByTask.length ? (
+              <p className="text-xs text-muted sm:col-span-2">
+                By task:{" "}
+                {spendByTask.map((item) => `${item.task_key} ${item.tokens.toLocaleString()}`).join(" · ")}
+              </p>
+            ) : null}
+          </div>
           <div className="mt-4 flex flex-wrap items-end gap-3">
             {can("pause") ? (
-              <button
+              <BusyButton
                 type="button"
-                disabled={busy}
+                busy={busy}
                 className="border border-ink px-3 py-2 text-sm"
                 onClick={() => run(() => api(`/api/projects/${project.id}/pause`, { method: "POST" }))}
               >
                 Pause project
-              </button>
+              </BusyButton>
             ) : null}
             {can("unpause") ? (
-              <button
+              <BusyButton
                 type="button"
-                disabled={busy}
+                busy={busy}
                 className="bg-moss px-3 py-2 text-sm text-white"
                 onClick={() => run(() => api(`/api/projects/${project.id}/unpause`, { method: "POST" }))}
               >
                 Unpause project
-              </button>
+              </BusyButton>
             ) : null}
             {can("revoke_agents") ? (
-              <button
+              <BusyButton
                 type="button"
-                disabled={busy}
+                busy={busy}
                 className="border border-oxide px-3 py-2 text-sm text-oxide"
                 onClick={() => run(() => api(`/api/projects/${project.id}/revoke-agents`, { method: "POST" }))}
               >
                 Revoke agents
-              </button>
+              </BusyButton>
             ) : null}
             {can("restore_agents") ? (
-              <button
+              <BusyButton
                 type="button"
-                disabled={busy}
+                busy={busy}
                 className="bg-moss px-3 py-2 text-sm text-white"
                 onClick={() => run(() => api(`/api/projects/${project.id}/restore-agents`, { method: "POST" }))}
               >
                 Restore agents
-              </button>
+              </BusyButton>
             ) : null}
             <label className="text-sm">
               Raise ceiling
@@ -428,27 +477,41 @@ export default function ProjectPage() {
         )}
         {error ? <p className="text-sm text-oxide">{error}</p> : null}
 
-        <section className="border border-line bg-white/70 p-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <section className="ui-panel p-5">
+          <div className="ui-panel-header">
             <h2 className="font-serif text-2xl">Status</h2>
-            <p className="text-xs tracking-[0.18em] text-muted uppercase">{liveLabel}</p>
+            <LiveDot live={isLive} label={liveLabel} />
           </div>
-          <p className="mt-1 text-sm text-muted">
-            Task counts, who is waiting on whom, open gates, and which agents are busy. Refreshes every
-            1.5s while this page is open — including during a long Run.
+          <p className="text-sm text-muted">
+            Task counts, blockers, open gates, and busy agents. Refreshes every 1.5s — including during a
+            long Run.
           </p>
+          {tasks.total ? (
+            <div className="mt-4">
+              <ProgressBar
+                value={tasks.pct}
+                tone={tasks.active ? "amber" : tasks.pct >= 100 ? "moss" : "ink"}
+                label="Delivery"
+                detail={`${tasks.done} done · ${tasks.active} in flight · ${tasks.total} total`}
+              />
+            </div>
+          ) : null}
           {status.needs_you.length ? (
             <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
               Waiting on you: {status.needs_you.join(" · ")}. Resume below, or run other ready tasks.
             </p>
           ) : null}
           {Object.keys(status.task_counts).length ? (
-            <p className="mt-4 text-sm">
-              Tasks:{" "}
-              {Object.entries(status.task_counts)
-                .map(([state, count]) => `${state.replaceAll("_", " ")} ${count}`)
-                .join(" · ")}
-            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {Object.entries(status.task_counts).map(([state, count]) => (
+                <span
+                  key={state}
+                  className="border border-line bg-paper/70 px-2.5 py-1 text-xs uppercase tracking-[0.12em] text-muted"
+                >
+                  {state.replaceAll("_", " ")} <span className="text-ink">{count}</span>
+                </span>
+              ))}
+            </div>
           ) : (
             <p className="mt-4 text-sm text-muted">No tasks yet.</p>
           )}
@@ -465,14 +528,19 @@ export default function ProjectPage() {
             <p className="mt-3 text-sm text-muted">Open gates: {status.open_gates.join(" · ")}</p>
           ) : null}
           {status.agents.length ? (
-            <p className="mt-3 text-sm">
-              Agents:{" "}
-              {status.agents.map((agent) => `${agent.role} ${agent.state}`).join(" · ")}
+            <p className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <span>Agents:</span>
+              {status.agents.map((agent) => (
+                <span key={agent.role} className="inline-flex items-center gap-1.5 border border-line px-2 py-0.5 text-xs">
+                  {agent.state === "working" || agent.state === "in_progress" ? <Spinner /> : null}
+                  {agent.role} · {agent.state}
+                </span>
+              ))}
             </p>
           ) : null}
         </section>
 
-        <section className="border border-line bg-white/70 p-5">
+        <section className="ui-panel p-5">
           <h2 className="font-serif text-2xl">Approval policy</h2>
           <p className="mt-1 text-sm text-muted">
             Each gate is human or automatic. Automatic means the system continues without waiting
@@ -561,7 +629,13 @@ export default function ProjectPage() {
               className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
               onClick={() => run(() => api(`/api/projects/${project.id}/interpret`, { method: "POST" }))}
             >
-              {busy ? "Working…" : "Interpret the request"}
+              {busy ? (
+                <span className="inline-flex items-center gap-2">
+                  <Spinner /> Working…
+                </span>
+              ) : (
+                "Interpret the request"
+              )}
             </button>
           )}
         </section>
@@ -1322,6 +1396,7 @@ export default function ProjectPage() {
             ))}
           </ol>
         </section>
+      </div>
       </div>
     </main>
   );
