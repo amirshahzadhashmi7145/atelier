@@ -122,8 +122,8 @@ class ExecutionService:
         except DomainError as exc:
             self._fail(project, task, exc.message)
             return self.planning.snapshot(project.id)
-        # With automatic merge, finish QA in the same click so smoke-test
-        # "untestable" findings do not strand every task on a human button.
+        # With automatic merge, finish QA in the same click so the loop
+        # either merges a real pass or sends untestable/fail criteria back.
         self.session.flush()
         self.session.refresh(task)
         if task.state == TaskState.IN_REVIEW.value and is_automatic(
@@ -288,7 +288,8 @@ class ExecutionService:
                 f"{len(failed)} criteria failed. The task is ready for another attempt.",
             )
         else:
-            flagged = [item.criterion_key for item in findings if item.result == "untestable"]
+            untestable = [item for item in findings if item.result == "untestable"]
+            flagged = [item.criterion_key for item in untestable]
             self.planning._event(
                 project,
                 "qa.untestable",
@@ -300,11 +301,28 @@ class ExecutionService:
                     "summary": "Could not test " + ", ".join(flagged) + ".",
                 },
             )
-            # Merge already automatic ⇒ the person opted out of this pause;
-            # do not strand every task on smoke-test "untestable" findings.
+            # Automatic merge must not waive gaps — agents make criteria executable.
             if is_automatic(project.gate_policy, "merge"):
-                self.session.flush()
-                return self._auto_waive_untestable(project_id, task_id)
+                self._send_back(
+                    project,
+                    task,
+                    [
+                        (
+                            item.criterion_key,
+                            item.reproduction.strip() or "Execute this acceptance criterion.",
+                            item.observed.strip()
+                            or item.note.strip()
+                            or "Could not be executed in this review.",
+                            item.expected.strip()
+                            or "The criterion is executable and the checks prove it.",
+                        )
+                        for item in untestable
+                    ],
+                    f"{len(untestable)} criteria were untestable. "
+                    "The task is ready for another attempt.",
+                    event_type="qa.rejected_untestable",
+                )
+                return self.planning.snapshot(project.id)
         return self.planning.snapshot(project.id)
 
     def accept(self, project_id: str, task_id: str, *, actor_kind: str = "user") -> ProjectSnapshot:
@@ -444,22 +462,6 @@ class ExecutionService:
             },
         )
         return self.planning.snapshot(project.id)
-
-    def _auto_waive_untestable(self, project_id: str, task_id: str) -> ProjectSnapshot:
-        flagged = list(
-            self.session.scalars(
-                select(CriterionFinding).where(
-                    CriterionFinding.task_id == task_id,
-                    CriterionFinding.result == "untestable",
-                )
-            ).all()
-        )
-        return self._finish_waive(
-            project_id,
-            task_id,
-            flagged,
-            actor_kind="system",
-        )
 
     def _finish_waive(
         self,

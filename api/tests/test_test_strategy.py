@@ -1,0 +1,40 @@
+import pytest
+
+from app.domain.test_strategy import is_trivial_test_command, validate_test_strategy
+from app.errors import DomainError
+
+
+def test_print_ok_smokes_are_trivial():
+    assert is_trivial_test_command('python3 -c "print(\'unit ok\')"')
+    assert is_trivial_test_command("node -e \"console.log('unit ok')\"")
+    assert is_trivial_test_command("true")
+
+
+def test_asserting_commands_are_not_trivial():
+    assert not is_trivial_test_command(
+        'python3 -c "from pathlib import Path; assert Path(\'server\').is_dir()"'
+    )
+    assert not is_trivial_test_command("node scripts/verify.js")
+    assert not is_trivial_test_command("npm test")
+    assert not is_trivial_test_command('python3 -c "import sys; sys.exit(2)"')
+
+
+def test_validate_test_strategy_rejects_placeholder_smokes():
+    with pytest.raises(DomainError, match="placeholder"):
+        validate_test_strategy(
+            {
+                "unit": 'python3 -c "print(\'unit ok\')"',
+                "integration": 'python3 -c "print(\'integration ok\')"',
+                "ui": 'python3 -c "print(\'ui ok\')"',
+            }
+        )
+
+
+def test_validate_test_strategy_accepts_real_commands():
+    validate_test_strategy(
+        {
+            "unit": 'python3 -c "from pathlib import Path; assert Path(\'server\').is_dir()"',
+            "integration": "node scripts/verify.js",
+            "ui": "npm test",
+        }
+    )

@@ -224,7 +224,7 @@ export default function ProjectPage() {
           Atelier
         </Link>
         <Link
-          href={`/office?project=${project.id}`}
+          href="/office"
           className="mt-3 block text-sm text-muted underline-offset-4 hover:text-ink hover:underline"
         >
           Coders Alley

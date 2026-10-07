@@ -98,6 +98,7 @@ def test_run_checks_uses_the_sandbox_when_configured(tmp_path: Path):
     assert all(item.exit_code == 0 for item in results)
     assert all(item.excerpt == "sandboxed" for item in results)
     assert calls[0][1][:1] == ["python3"]
+    assert all(kwargs.get("writable") for _root, _argv, kwargs in calls)
 
 
 def test_run_checks_uses_the_node_image_for_npm(tmp_path: Path):
@@ -121,6 +122,69 @@ def test_run_checks_uses_the_node_image_for_npm(tmp_path: Path):
 
     assert all(item.exit_code == 0 for item in results)
     assert images == ["node:20-slim", "node:20-slim", "node:20-slim"]
+
+
+def test_run_checks_installs_npm_deps_before_verify(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        '{"name":"demo","dependencies":{"left-pad":"1.3.0"}}',
+        encoding="utf-8",
+    )
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_sandbox(root, argv, **kwargs):
+        calls.append((list(argv), dict(kwargs)))
+        if argv[:1] == ["npm"] and "install" in argv:
+            (root / "node_modules").mkdir(exist_ok=True)
+        return 0, "ok"
+
+    with patch("app.services.checks.run_in_sandbox", side_effect=fake_sandbox):
+        results = run_checks(
+            tmp_path,
+            {
+                "unit": "node scripts/verify.js",
+                "integration": "node scripts/verify.js",
+                "ui": "node scripts/verify.js",
+            },
+            timeout=5,
+            sandbox=SandboxOptions(image="python:3.12-slim", node_image="node:20-slim"),
+        )
+
+    assert all(item.exit_code == 0 for item in results)
+    assert calls[0][0][:2] == ["npm", "install"]
+    assert calls[0][1].get("network") is True
+    assert calls[0][1].get("writable") is True
+    assert calls[0][1]["image"] == "node:20-slim"
+    assert len(calls) == 4
+    assert all(call[1].get("network") is False for call in calls[1:])
+
+
+def test_sandbox_install_mode_allows_network_and_writable_mount(tmp_path: Path):
+    captured: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        captured.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
+
+    with patch("app.services.sandbox.subprocess.run", side_effect=fake_run):
+        code, _excerpt = run_in_sandbox(
+            tmp_path,
+            ["npm", "install", "--ignore-scripts"],
+            image="node:20-slim",
+            timeout=5,
+            memory="128m",
+            cpus="0.5",
+            pids_limit=32,
+            network=True,
+            writable=True,
+        )
+
+    assert code == 0
+    argv = captured[0]
+    assert "--network=bridge" in argv
+    assert "--network=none" not in argv
+    assert "--read-only" not in argv
+    mounts = [item for item in argv if item.startswith("type=bind,")]
+    assert mounts == [f"type=bind,source={tmp_path.resolve()},target=/workspace"]
 
 
 @pytest.mark.skipif(

@@ -97,17 +97,124 @@ export const SPOTS = {
   plant: { x: -6.2, z: 3.8 },
   stretch: { x: 0.4, z: 0.2 },
   snack: { x: 5.0, z: 2.2 },
-  foosball: { x: 1.2, z: 3.6 },
-  foosballB: { x: 2.0, z: 3.6 },
+  /** Game corner (front-left) — players on opposite long sides of the table. */
+  foosball: { x: -2.15, z: 3.5 },
+  foosballB: { x: -2.15, z: 4.8 },
   reading: { x: -5.8, z: -1.2 },
   microwave: { x: 6.2, z: 1.4 },
   beanbag: { x: -4.2, z: 2.4 },
   phone: { x: -0.6, z: -0.8 },
-  pet: { x: 0, z: 1.2 },
   /** Outdoor patio — smokers hang here. */
   smoke: { x: 6.4, z: -4.2 },
   smokeB: { x: 5.6, z: -4.6 },
+  /** Floor staff anchors */
+  reception: { x: 3.8, z: 4.55 },
+  printer: { x: 6.4, z: 0.2 },
+  trashA: { x: -3.5, z: -4.6 },
+  trashB: { x: 5.8, z: 3.8 },
+  supply: { x: -7.1, z: 2.2 },
 } as const;
+
+export type StaffId = "office_boy" | "receptionist" | "pantry";
+
+export type StaffMember = {
+  id: StaffId;
+  title: string;
+  name: string;
+  label: string;
+  gender: Gender;
+  roleTitle: string;
+  skin: string;
+  hair: string;
+  shirt: string;
+  pants: string;
+  blazer: string | null;
+  shoe: string;
+  /** Home / idle position */
+  home: { x: number; z: number };
+};
+
+/** Support crew — not tied to project desks. */
+export const STAFF: StaffMember[] = [
+  {
+    id: "office_boy",
+    title: "Mr.",
+    name: "Bilal Hussain",
+    label: "Mr. Bilal Hussain",
+    gender: "male",
+    roleTitle: "Office Boy",
+    skin: "#c68642",
+    hair: "#1a1614",
+    shirt: "#1e3a5f",
+    pants: "#1a1f28",
+    blazer: null,
+    shoe: "#141210",
+    home: { x: 5.0, z: 3.4 },
+  },
+  {
+    id: "receptionist",
+    title: "Ms.",
+    name: "Zara Ahmed",
+    label: "Ms. Zara Ahmed",
+    gender: "female",
+    roleTitle: "Reception",
+    skin: "#e0b080",
+    hair: "#2c1810",
+    shirt: "#5c3d2e",
+    pants: "#2a2430",
+    blazer: "#3d2918",
+    shoe: "#1a1410",
+    home: { x: SPOTS.reception.x, z: SPOTS.reception.z },
+  },
+  {
+    id: "pantry",
+    title: "Ms.",
+    name: "Nadia Khan",
+    label: "Ms. Nadia Khan",
+    gender: "female",
+    roleTitle: "Pantry Attendant",
+    skin: "#d4a574",
+    hair: "#1c1915",
+    shirt: "#6b3a2a",
+    pants: "#2a2018",
+    blazer: null,
+    shoe: "#1c1915",
+    home: { x: SPOTS.coffeeMachine.x - 0.6, z: SPOTS.coffeeMachine.z + 0.5 },
+  },
+];
+
+export type StaffDuty =
+  | "home"
+  | "desk_round"
+  | "printer"
+  | "trash"
+  | "pantry"
+  | "reception"
+  | "meeting"
+  | "chai"
+  | "water"
+  | "files"
+  | "snack_restock";
+
+export type StaffView = {
+  id: StaffId;
+  label: string;
+  title: string;
+  name: string;
+  gender: Gender;
+  roleTitle: string;
+  activity: string;
+  duty: StaffDuty;
+  dutyLabel: string;
+  skin: string;
+  hair: string;
+  shirt: string;
+  pants: string;
+  blazer: string | null;
+  shoe: string;
+  dialogue?: string;
+  holdTray: boolean;
+};
 
 export const COFFEE = SPOTS.coffeeMachine;
 
@@ -124,7 +231,6 @@ export type FunKind =
   | "microwave"
   | "nap"
   | "phone"
-  | "pet"
   | "plane"
   | "celebrate"
   | "smoke"
@@ -180,22 +286,21 @@ const COLORS: Record<DeskId, string> = {
 };
 
 const FUN_LABELS: Record<Exclude<FunKind, null>, string> = {
-  brew: "Brewing a pour-over",
-  sip: "Sipping coffee",
-  water: "Refilling water",
-  board: "Doodling on the whiteboard",
-  plant: "Watering the office plant",
-  stretch: "Stretch break",
-  snack: "Raid the snack shelf",
-  foosball: "Foosball sudden-death",
-  read: "Reading on the bean-side nook",
-  microwave: "Reheating leftovers",
-  nap: "Power nap on the beanbag",
-  phone: "Taking a quick call",
-  pet: "Scratching the office dog",
-  plane: "Launching a paper plane",
-  celebrate: "Victory lap — task zone done",
-  smoke: "Stress smoke on the patio",
+  brew: "Making coffee",
+  sip: "Coffee break",
+  water: "Getting water",
+  board: "Whiteboard thinking",
+  plant: "Watering the plant",
+  stretch: "Stretching",
+  snack: "Snack run",
+  foosball: "Foosball",
+  read: "Quiet reading",
+  microwave: "Heating lunch",
+  nap: "Resting eyes",
+  phone: "On a call",
+  plane: "Paper plane break",
+  celebrate: "Small win",
+  smoke: "Patio break",
 };
 
 function normalizeRole(role: string): DeskId | null {
@@ -212,8 +317,67 @@ export function demoAgents(): AgentView[] {
   return DESKS.map((desk) => ({
     ...personFromDesk(desk),
     state: "idle" as const,
-    activity: "Select a live project — meanwhile, Coders Alley break-room mode",
+    activity: "No projects yet — Coders Alley break-room mode",
   }));
+}
+
+const STATE_RANK: Record<AgentView["state"], number> = {
+  working: 4,
+  blocked: 3,
+  waiting: 2,
+  done: 1,
+  idle: 0,
+};
+
+/**
+ * Merge every project into one floor: each desk shows the hottest work
+ * across Atelier, not a single picked board.
+ */
+export function agentsFromSnapshots(snapshots: Snapshot[]): AgentView[] {
+  if (!snapshots.length) return demoAgents();
+  if (snapshots.length === 1) return agentsFromSnapshot(snapshots[0]);
+
+  const ranked = snapshots.map((snapshot) => ({
+    name: snapshot.project.name,
+    agents: agentsFromSnapshot(snapshot),
+  }));
+
+  return DESKS.map((desk) => {
+    const rows = ranked
+      .map((row) => {
+        const agent = row.agents.find((item) => item.id === desk.id);
+        return agent ? { projectName: row.name, agent } : null;
+      })
+      .filter((row): row is { projectName: string; agent: AgentView } => row != null)
+      .sort((a, b) => {
+        const byState = STATE_RANK[b.agent.state] - STATE_RANK[a.agent.state];
+        if (byState !== 0) return byState;
+        return (b.agent.updatedAt || "").localeCompare(a.agent.updatedAt || "");
+      });
+
+    const top = rows[0];
+    if (!top) {
+      return {
+        ...personFromDesk(desk),
+        state: "idle" as const,
+        activity: "No assigned work yet",
+      };
+    }
+
+    const active = rows.filter(
+      (row) =>
+        row.agent.state === "working" ||
+        row.agent.state === "blocked" ||
+        row.agent.state === "waiting",
+    );
+    const extra =
+      active.length > 1 ? ` · +${active.length - 1} more project${active.length > 2 ? "s" : ""}` : "";
+
+    return {
+      ...top.agent,
+      activity: `${top.projectName}: ${top.agent.activity}${extra}`,
+    };
+  });
 }
 
 export function agentsFromSnapshot(snapshot: Snapshot): AgentView[] {
@@ -411,13 +575,14 @@ const FUN_ROTATION: FunSlot[] = [
   { fun: "microwave", x: SPOTS.microwave.x, z: SPOTS.microwave.z, holdCup: false },
   { fun: "nap", x: SPOTS.beanbag.x, z: SPOTS.beanbag.z, holdCup: false, sit: true },
   { fun: "phone", x: SPOTS.phone.x, z: SPOTS.phone.z, holdCup: false },
-  { fun: "pet", x: SPOTS.pet.x, z: SPOTS.pet.z, holdCup: false },
   { fun: "plane", x: SPOTS.stretch.x + 0.8, z: SPOTS.stretch.z - 0.4, holdCup: false },
   { fun: "smoke", x: SPOTS.smoke.x, z: SPOTS.smoke.z, holdCup: false },
 ];
 
-const LOOP = 36;
-const STRESS_LOOP = 22;
+/** Seconds per break activity — long holds so movement stays calm. */
+const LOOP = 120;
+const STRESS_LOOP = 80;
+const DIALOGUE_BEAT = 18;
 
 const SMOKE_SLOT: FunSlot = {
   fun: "smoke",
@@ -464,18 +629,6 @@ function slotFor(agent: AgentView, time: number, index: number): FunSlot {
   return FUN_ROTATION[(index + Math.floor(time / LOOP)) % FUN_ROTATION.length];
 }
 
-export function currentFun(agent: AgentView, time: number, index: number): FunKind {
-  if (!canBreak(agent.state)) return null;
-  if (agent.state === "blocked") {
-    const cycle = (time + index * 7) % STRESS_LOOP;
-    if (cycle < 8 || cycle > 18) return null;
-    return "smoke";
-  }
-  const cycle = (time + index * 9) % LOOP;
-  if (cycle < 20 || cycle > 30) return null;
-  return slotFor(agent, time, index).fun;
-}
-
 /**
  * Working stays at desk. Blocked/idle/waiting can leave for breaks —
  * smokers go to the patio when idle or stressed.
@@ -489,7 +642,7 @@ export function targetForAgent(agent: AgentView, desk: Desk, time: number, index
 
   if (agent.state === "blocked") {
     const cycle = (time + index * 7) % STRESS_LOOP;
-    if (cycle >= 8 && cycle <= 18) {
+    if (cycle >= 10 && cycle <= 24) {
       const slot = smokeSlot(index);
       return {
         x: slot.x,
@@ -506,10 +659,11 @@ export function targetForAgent(agent: AgentView, desk: Desk, time: number, index
   const cycle = (time + index * 9) % LOOP;
   const slot = slotFor(agent, time, index);
 
-  if (cycle >= 20 && cycle <= 30) {
+  /* Longer linger at the activity so walks finish before they turn around. */
+  if (cycle >= 22 && cycle <= 44) {
     if (slot.fun === "celebrate") {
       return {
-        x: desk.x + Math.sin(time * 3 + index) * 0.35,
+        x: desk.x,
         z: desk.z + 1.0,
         sit: false,
         faceDesk: false,
@@ -527,95 +681,100 @@ export function targetForAgent(agent: AgentView, desk: Desk, time: number, index
     };
   }
 
-  if (cycle > 30 && cycle < 33 && slot.fun === "brew") {
+  if (cycle > 44 && cycle < 50 && slot.fun === "brew") {
     return { ...stand, holdCup: true, fun: "sip" };
   }
 
   return stand;
 }
 
+/** Fun label matches the pose the character is actually walking to. */
+export function currentFun(agent: AgentView, time: number, index: number): FunKind {
+  const desk = DESKS.find((d) => d.id === agent.id) ?? DESKS[0];
+  return targetForAgent(agent, desk, time, index).fun;
+}
+
 const LINES_BY_FUN: Record<Exclude<FunKind, null>, string[]> = {
-  brew: ["Oat milk or chaos?", "This shot looks… philosophical.", "Barista mode: engaged."],
-  sip: ["Ahh. Deploy fuel.", "Hot. Like prod on Fridays.", "Don't tell PM this is my third."],
-  water: ["Hydrate or hallucinate.", "Is this filtered? Asking for my tokens.", "Water cooler lore incoming."],
-  board: ["What if we… boxed the arrow?", "This diagram has vibes.", "Future us will thank present us. Maybe."],
-  plant: ["You're doing great, plant.", "Photosynthesis > standups.", "Grow, little green teammate."],
-  stretch: ["Touching toes is a stretch goal.", "Spine says thanks.", "Yoga for YAML."],
-  snack: ["Is this free? It's on the shelf.", "Sugar for the sprint.", "I regret nothing. Yet."],
-  foosball: ["GOAL— wait, own goal.", "Rod warriors!", "Best of one. Sudden death."],
-  read: ["Chapter 3: rediscovering focus.", "Plot twist: the bug was docs.", "Shh. Deep work cosplay."],
-  microwave: ["90 seconds of suspense.", "Leftover lasagna diplomacy.", "Beep means destiny."],
-  nap: ["Five minutes. Tops.", "Dreaming of green builds.", "Do not disturb / do not merge."],
-  phone: ["No I can't hop on a quick call— oh wait.", "You're breaking up. Conveniently.", "Circle back? Let's square it."],
-  pet: ["Who's a good merge conflict resolver?", "Soft ears > hard deadlines.", "Dog approved this PR."],
-  plane: ["Aerodynamics of procrastination.", "Flying toward main.", "Catch it, Frontend!"],
-  celebrate: ["Ship it energy!", "We did a thing!", "Confetti in my heart."],
+  brew: ["Medium roast today.", "Need a minute before standup.", "Coffee first, then the board."],
+  sip: ["That's better.", "Okay — back in five.", "Warm cup, clear head."],
+  water: ["Refill, then deep work.", "Anyone else thirsty?", "Cooler gossip can wait."],
+  board: ["Let's map the edge cases.", "If this arrow is the user…", "Simplest path wins."],
+  plant: ["Still alive. Good sign.", "Little water, big difference.", "Office needs something green."],
+  stretch: ["Shoulders were locked.", "Two minutes, then keyboard.", "Standing helps."],
+  snack: ["Just one.", "Protein bar or regret?", "Back to the desk after this."],
+  foosball: ["One game.", "Your serve.", "Okay, best of one."],
+  read: ["Quiet corner helps.", "One chapter, then tickets.", "Docs before code sometimes."],
+  microwave: ["Lunch in ninety seconds.", "Don't burn it this time.", "Timer's set."],
+  nap: ["Eyes closed. Five minutes.", "Don't wake me for nits.", "Resetting."],
+  phone: ["Can you hear me?", "I'll send the notes after.", "Yes — same thread."],
+  plane: ["Don't tell Fatima.", "Ayesha, catch!", "Okay, that was the break."],
+  celebrate: ["That zone is done.", "Nice — next ticket.", "Small win. Keep going."],
   smoke: [
-    "Patio. Nicotine. Perspective.",
-    "This bug owes me a cigarette.",
-    "Don't tell compliance.",
-    "One drag, then back to the graph.",
-    "Stress deploy ritual.",
+    "Air helps.",
+    "Two minutes, then back.",
+    "This one's stubborn.",
+    "Alright — back to it.",
+    "Clear head, then debug.",
   ],
 };
 
 const LINES_BY_STATE: Record<AgentView["state"], string[]> = {
   working: [
-    "One more failing test…",
-    "Typing goes brr.",
-    "Don't look at the diff yet.",
-    "In the zone. Barely.",
+    "Almost have this test green.",
+    "Reviewing the edge case…",
+    "Typing through the hard part.",
+    "Give me a few more minutes.",
   ],
   waiting: [
-    "Any day now…",
-    "Queue anxiety is real.",
-    "I'll just… hover.",
-    "Ping me when Run next is brave.",
+    "Waiting on the next handoff.",
+    "Queue's quiet right now.",
+    "Ping me when it's ready.",
+    "I'll stay close to the desk.",
   ],
   blocked: [
-    "Help. Politely screaming.",
-    "Blocked harder than a firewall.",
-    "Human, we need you.",
+    "Need a human decision here.",
+    "Stuck — can't move without approval.",
+    "Escalation's waiting on you.",
   ],
-  idle: ["Idle hands, curious brain.", "Waiting for the plot.", "Ambient productivity."],
-  done: ["Zone clear. Ego inflated.", "I could get used to green.", "Victory nap loading…"],
+  idle: ["Ready when there's work.", "Floor's calm for now.", "Coffee's still warm."],
+  done: ["That zone looks good.", "Green checks — nice.", "Ready for the next slice."],
 };
 
 const BANTER: { a: DeskId; b: DeskId; lines: [string, string] }[] = [
   {
     a: "backend",
     b: "frontend",
-    lines: ["Ayesha, API contract is frozen… right?", "Ali bhai, frozen like my CSS. Sure."],
+    lines: ["Ayesha, API shape is settled — okay to wire?", "Ali, send the sample payload and I'll hook it."],
   },
   {
     a: "qa",
     b: "backend",
-    lines: ["Ali, can you repro with steps?", "Sana, it works on my branch."],
+    lines: ["Ali, can you share repro steps for that 500?", "Sana, pushing a fix branch now — try again in a bit."],
   },
   {
     a: "pm",
     b: "qa",
-    lines: ["Sana, scope is tiny, I swear.", "Fatima ji, that's what you said last round."],
+    lines: ["Sana, is this still in scope for the round?", "Fatima, yes — I'll mark what slips."],
   },
   {
     a: "frontend",
     b: "ai_engineer",
-    lines: ["Hassan, can the model write button copy?", "Ayesha, only if you accept weird commas."],
+    lines: ["Hassan, can the model draft empty-state copy?", "Ayesha, sure — keep the tone short."],
   },
   {
     a: "ai_engineer",
     b: "pm",
-    lines: ["Fatima ji, we might need evals.", "Hassan, add it to the backlog of feelings."],
+    lines: ["Fatima, we should budget time for evals.", "Hassan, note it — we'll sequence after this zone."],
   },
   {
     a: "qa",
     b: "frontend",
-    lines: ["Ayesha, Mobile Safari says hi.", "Sana, I fear that sentence."],
+    lines: ["Ayesha, layout breaks under 360px width.", "Sana, thanks — fixing the flex wrap now."],
   },
   {
     a: "backend",
     b: "pm",
-    lines: ["Fatima ji — patio. Coming?", "Ali, bring two. The graph is spicy."],
+    lines: ["Fatima — stepping out for two minutes.", "Ali, go. I'll hold the board."],
   },
 ];
 
@@ -624,13 +783,14 @@ function pick<T>(items: T[], salt: number): T {
 }
 
 function lineForAgent(agent: AgentView, fun: FunKind, time: number, index: number): string | undefined {
-  // Speak in short windows so bubbles feel conversational, not permanent
-  const beat = Math.floor((time + index * 3.7) / 4.5);
-  const phase = (time + index * 3.7) % 4.5;
-  if (phase > 3.2) return undefined; // pause between lines
+  // Speak rarely — short bubbles, long silence
+  const beat = Math.floor((time + index * 5.1) / DIALOGUE_BEAT);
+  const phase = (time + index * 5.1) % DIALOGUE_BEAT;
+  if (phase > 3.8) return undefined;
+  // Stagger who talks so the floor isn't a chorus
+  if ((beat + index) % 3 !== 0 && !fun) return undefined;
 
-  // Banter takes priority every few beats
-  if (beat % 5 === 0) {
+  if (beat % 8 === 0) {
     const pair = BANTER[(beat + index) % BANTER.length];
     if (agent.id === pair.a) return pair.lines[0];
     if (agent.id === pair.b) return pair.lines[1];
@@ -640,15 +800,16 @@ function lineForAgent(agent: AgentView, fun: FunKind, time: number, index: numbe
     return pick(LINES_BY_FUN[fun], beat * 13 + index * 7);
   }
 
-  const taskBit = agent.taskKey ? ` (${agent.taskKey})` : "";
-  const base = pick(LINES_BY_STATE[agent.state], beat * 11 + index * 5);
   if (agent.state === "working" && agent.taskKey && beat % 2 === 0) {
-    return `${agent.taskKey}: almost elegant.`;
+    return `Working through ${agent.taskKey}.`;
   }
   if (agent.state === "waiting" && agent.taskKey && beat % 2 === 0) {
-    return `Still waiting on ${agent.taskKey}…`;
+    return `Still waiting on ${agent.taskKey}.`;
   }
-  return base + (beat % 3 === 0 ? taskBit : "");
+  if (agent.state === "blocked" && agent.taskKey) {
+    return `${agent.taskKey} needs a decision.`;
+  }
+  return pick(LINES_BY_STATE[agent.state], beat * 11 + index * 5);
 }
 
 export function withFunOverlay(agents: AgentView[], time: number): AgentView[] {
@@ -658,10 +819,10 @@ export function withFunOverlay(agents: AgentView[], time: number): AgentView[] {
     if (fun === "smoke") {
       funLabel =
         agent.state === "blocked"
-          ? "Stress smoke on the patio"
+          ? "Patio break — blocked"
           : agent.state === "waiting"
-            ? "Waiting-smoke on the patio"
-            : "Idle smoke on the patio";
+            ? "Patio break — waiting"
+            : "Patio break";
     } else if (fun) {
       funLabel = FUN_LABELS[fun];
     }
@@ -673,19 +834,182 @@ export function withFunOverlay(agents: AgentView[], time: number): AgentView[] {
   });
 }
 
+const STAFF_DUTY_LABEL: Record<StaffDuty, string> = {
+  home: "At station",
+  desk_round: "Desk round",
+  printer: "Printer run",
+  trash: "Clearing bins",
+  pantry: "Pantry duty",
+  reception: "Front desk",
+  meeting: "Meeting table",
+  chai: "Tea round",
+  water: "Water run",
+  files: "Filing",
+  snack_restock: "Restocking snacks",
+};
+
+const STAFF_LINES: Record<StaffId, string[]> = {
+  office_boy: [
+    "Chai for the backend desk?",
+    "Printer's warm — copies coming.",
+    "Bins are clear.",
+    "Files are on Fatima's desk.",
+    "Anything else you need?",
+  ],
+  receptionist: [
+    "Coders Alley — how can I help?",
+    "Visitor signed in.",
+    "I'll hold your packages.",
+    "Meeting room is free after three.",
+    "Welcome — desks are that way.",
+  ],
+  pantry: [
+    "Fresh pot in five minutes.",
+    "Snacks are restocked.",
+    "Cups are washed.",
+    "Sugar's on the left.",
+    "Tell them lunch is ready.",
+  ],
+};
+
+type StaffRoute = { duty: StaffDuty; x: number; z: number; sit?: boolean; holdTray?: boolean; face?: number };
+
+function deskVisit(index: number): StaffRoute {
+  const desk = DESKS[index % DESKS.length];
+  return {
+    duty: "desk_round",
+    x: desk.x + 0.55,
+    z: desk.z + 0.95,
+    holdTray: true,
+    face: Math.PI,
+  };
+}
+
+function routesForStaff(id: StaffId): StaffRoute[] {
+  if (id === "office_boy") {
+    return [
+      { duty: "pantry", x: SPOTS.coffeeMachine.x - 0.35, z: SPOTS.coffeeMachine.z + 0.55, holdTray: true },
+      deskVisit(0),
+      deskVisit(1),
+      { duty: "chai", x: SPOTS.coffeeSip.x, z: SPOTS.coffeeSip.z, holdTray: true },
+      deskVisit(2),
+      { duty: "printer", x: SPOTS.printer.x, z: SPOTS.printer.z, face: 0 },
+      deskVisit(3),
+      { duty: "files", x: SPOTS.supply.x, z: SPOTS.supply.z, face: Math.PI / 2 },
+      deskVisit(4),
+      { duty: "trash", x: SPOTS.trashA.x, z: SPOTS.trashA.z },
+      { duty: "meeting", x: 0.2, z: 2.9, holdTray: true },
+      { duty: "water", x: SPOTS.waterCooler.x + 0.35, z: SPOTS.waterCooler.z },
+      { duty: "home", x: STAFF[0].home.x, z: STAFF[0].home.z },
+    ];
+  }
+  if (id === "receptionist") {
+    return [
+      {
+        duty: "reception",
+        x: SPOTS.reception.x,
+        z: SPOTS.reception.z,
+        sit: true,
+        face: Math.PI,
+      },
+      {
+        duty: "reception",
+        x: SPOTS.reception.x,
+        z: SPOTS.reception.z,
+        sit: true,
+        face: Math.PI,
+      },
+      { duty: "meeting", x: 0.5, z: 2.7 },
+      {
+        duty: "reception",
+        x: SPOTS.reception.x,
+        z: SPOTS.reception.z,
+        sit: true,
+        face: Math.PI,
+      },
+      { duty: "pantry", x: SPOTS.coffeeSip.x + 0.3, z: SPOTS.coffeeSip.z },
+      {
+        duty: "reception",
+        x: SPOTS.reception.x,
+        z: SPOTS.reception.z,
+        sit: true,
+        face: Math.PI,
+      },
+    ];
+  }
+  return [
+    { duty: "pantry", x: SPOTS.coffeeMachine.x - 0.5, z: SPOTS.coffeeMachine.z + 0.45, face: 0 },
+    { duty: "snack_restock", x: SPOTS.snack.x - 0.25, z: SPOTS.snack.z + 0.35 },
+    { duty: "pantry", x: SPOTS.microwave.x - 0.35, z: SPOTS.microwave.z + 0.3 },
+    { duty: "water", x: SPOTS.waterCooler.x + 0.4, z: SPOTS.waterCooler.z - 0.1 },
+    { duty: "home", x: STAFF[2].home.x, z: STAFF[2].home.z, face: 0 },
+    { duty: "meeting", x: 0.9, z: 2.85, holdTray: true },
+  ];
+}
+
+const STAFF_HOLD = 22;
+
+export function targetForStaff(member: StaffMember, time: number, index: number): StaffRoute & { faceDesk: boolean } {
+  const routes = routesForStaff(member.id);
+  const slot = Math.floor((time + index * 11) / STAFF_HOLD) % routes.length;
+  const route = routes[slot];
+  return {
+    ...route,
+    faceDesk: Boolean(route.sit),
+  };
+}
+
+function staffDialogue(member: StaffMember, duty: StaffDuty, time: number, index: number): string | undefined {
+  const beat = Math.floor((time + index * 6.3) / DIALOGUE_BEAT);
+  const phase = (time + index * 6.3) % DIALOGUE_BEAT;
+  if (phase > 3.5) return undefined;
+  if ((beat + index) % 2 !== 0) return undefined;
+  if (duty === "chai" || duty === "desk_round") {
+    return pick(
+      ["Tea?", "Prints for your desk.", "Anything from the pantry?", "Leaving this here."],
+      beat * 5 + index,
+    );
+  }
+  return pick(STAFF_LINES[member.id], beat * 9 + index * 3);
+}
+
+export function floorStaff(time: number): StaffView[] {
+  return STAFF.map((member, index) => {
+    const route = targetForStaff(member, time, index);
+    return {
+      id: member.id,
+      label: member.label,
+      title: member.title,
+      name: member.name,
+      gender: member.gender,
+      roleTitle: member.roleTitle,
+      activity: STAFF_DUTY_LABEL[route.duty],
+      duty: route.duty,
+      dutyLabel: STAFF_DUTY_LABEL[route.duty],
+      skin: member.skin,
+      hair: member.hair,
+      shirt: member.shirt,
+      pants: member.pants,
+      blazer: member.blazer,
+      shoe: member.shoe,
+      holdTray: Boolean(route.holdTray),
+      dialogue: staffDialogue(member, route.duty, time, index),
+    };
+  });
+}
+
 /** Rolling chat feed for the side panel. */
 export function chatFeed(agents: AgentView[], time: number): ChatLine[] {
   const lines: ChatLine[] = [];
-  const windowStart = Math.max(0, Math.floor(time / 4.5) - 5);
-  for (let beat = windowStart; beat <= Math.floor(time / 4.5); beat++) {
+  const windowStart = Math.max(0, Math.floor(time / DIALOGUE_BEAT) - 4);
+  for (let beat = windowStart; beat <= Math.floor(time / DIALOGUE_BEAT); beat++) {
     for (const [index, agent] of agents.entries()) {
-      const t = beat * 4.5 + 0.5;
+      const t = beat * DIALOGUE_BEAT + 0.8;
       const fun = currentFun(agent, t, index);
       const text = lineForAgent(agent, fun, t, index);
       if (!text) continue;
-      // Only keep speakers who actually talk this beat
-      const phase = (t + index * 3.7) % 4.5;
-      if (phase > 3.2) continue;
+      const phase = (t + index * 5.1) % DIALOGUE_BEAT;
+      if (phase > 3.8) continue;
       lines.push({
         id: `${beat}-${agent.id}`,
         from: `${agent.title} ${agent.name.split(" ")[0]}`,
@@ -693,7 +1017,17 @@ export function chatFeed(agents: AgentView[], time: number): ChatLine[] {
         at: t,
       });
     }
+    for (const [index, member] of STAFF.entries()) {
+      const t = beat * DIALOGUE_BEAT + 1.2;
+      const view = floorStaff(t)[index];
+      if (!view?.dialogue) continue;
+      lines.push({
+        id: `${beat}-${member.id}`,
+        from: `${member.title} ${member.name.split(" ")[0]}`,
+        text: view.dialogue,
+        at: t,
+      });
+    }
   }
-  // Prefer banter pairs + latest
-  return lines.slice(-8);
+  return lines.sort((a, b) => a.at - b.at).slice(-10);
 }

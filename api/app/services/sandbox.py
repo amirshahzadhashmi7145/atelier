@@ -1,8 +1,8 @@
 """Run one program inside a short-lived container.
 
-The project directory is mounted read-only. The container has no network,
-no extra capabilities, and hard limits on memory, CPU and processes.
-The container is removed when the command finishes.
+By default the project directory is mounted read-only with no network.
+Install steps may opt into a writable mount and network so declared
+dependencies can be fetched before offline verify commands run.
 """
 
 import subprocess
@@ -38,32 +38,50 @@ def run_in_sandbox(
     memory: str,
     cpus: str,
     pids_limit: int,
+    network: bool = False,
+    writable: bool = False,
 ) -> tuple[int, str]:
     """Return (exit_code, excerpt) for argv run under Docker."""
 
     if not argv:
         return 127, "No program was given to the sandbox."
+    mount = f"type=bind,source={root.resolve()},target=/workspace"
+    if not writable:
+        mount += ",readonly"
     docker_argv = [
         "docker",
         "run",
         "--rm",
-        "--network=none",
-        f"--memory={memory}",
-        f"--cpus={cpus}",
-        f"--pids-limit={pids_limit}",
-        "--read-only",
-        "--tmpfs",
-        "/tmp:rw,noexec,nosuid,size=64m",
-        "--cap-drop=ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--mount",
-        f"type=bind,source={root.resolve()},target=/workspace,readonly",
-        "--workdir",
-        "/workspace",
-        image,
-        *argv,
     ]
+    if network:
+        docker_argv.append("--network=bridge")
+    else:
+        docker_argv.append("--network=none")
+    docker_argv.extend(
+        [
+            f"--memory={memory}",
+            f"--cpus={cpus}",
+            f"--pids-limit={pids_limit}",
+        ]
+    )
+    if not writable:
+        docker_argv.append("--read-only")
+        docker_argv.extend(["--tmpfs", "/tmp:rw,noexec,nosuid,size=64m"])
+    else:
+        docker_argv.extend(["--tmpfs", "/tmp:rw,exec,nosuid,size=256m"])
+    docker_argv.extend(
+        [
+            "--cap-drop=ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--mount",
+            mount,
+            "--workdir",
+            "/workspace",
+            image,
+            *argv,
+        ]
+    )
     try:
         completed = subprocess.run(
             docker_argv,

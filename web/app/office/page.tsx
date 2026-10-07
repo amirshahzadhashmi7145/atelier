@@ -2,22 +2,22 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { loadProject, loadProjects } from "@/lib/api";
-import type { ProjectListItem, Snapshot } from "@/lib/types";
+import type { Snapshot } from "@/lib/types";
 import {
-  agentsFromSnapshot,
+  agentsFromSnapshots,
   chatFeed,
   demoAgents,
+  floorStaff,
   withFunOverlay,
 } from "@/components/office/agentLogic";
 
 const OfficeScene3D = dynamic(() => import("@/components/office/OfficeScene3D"), {
   ssr: false,
   loading: () => (
-    <div className="mx-auto flex aspect-[16/11] w-full max-w-5xl items-center justify-center border border-line bg-[#cfc3ae] text-sm text-muted">
-      Opening Coders Alley…
+    <div className="office-stage mx-auto flex aspect-[16/10] w-full max-w-6xl items-center justify-center text-sm text-[#3f3124]/80">
+      Warming the loft lights…
     </div>
   ),
 });
@@ -47,21 +47,11 @@ function ago(iso?: string) {
 }
 
 function OfficeInner() {
-  const params = useSearchParams();
-  const projectId = params.get("project");
-  const [projects, setProjects] = useState<ProjectListItem[]>([]);
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState(projectId ?? "");
   const [syncedAt, setSyncedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [funTime, setFunTime] = useState(0);
-
-  useEffect(() => {
-    loadProjects()
-      .then(setProjects)
-      .catch((err: Error) => setError(err.message));
-  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -75,87 +65,94 @@ function OfficeInner() {
   }, []);
 
   useEffect(() => {
-    if (!selected) {
-      setSnapshot(null);
-      setSyncedAt(null);
-      return;
-    }
     let alive = true;
-    const poll = () => {
-      loadProject(selected)
-        .then((next) => {
-          if (!alive) return;
-          setSnapshot(next);
+    const poll = async () => {
+      try {
+        const list = await loadProjects();
+        if (!alive) return;
+        if (!list.length) {
+          setSnapshots([]);
           setSyncedAt(Date.now());
           setError("");
-        })
-        .catch((err: Error) => {
-          if (alive) setError(err.message);
-        });
+          return;
+        }
+        const next = await Promise.all(list.map((project) => loadProject(project.id)));
+        if (!alive) return;
+        setSnapshots(next);
+        setSyncedAt(Date.now());
+        setError("");
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : "The request failed.");
+      }
     };
     poll();
-    const timer = window.setInterval(poll, 1500);
+    const timer = window.setInterval(poll, 2000);
     return () => {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [selected]);
+  }, []);
 
-  const agents = withFunOverlay(snapshot ? agentsFromSnapshot(snapshot) : demoAgents(), funTime);
+  const baseAgents = snapshots.length ? agentsFromSnapshots(snapshots) : demoAgents();
+  const agents = withFunOverlay(baseAgents, funTime);
+  const staff = floorStaff(funTime);
   const chat = chatFeed(agents, funTime);
-  const live = Boolean(snapshot);
+  const live = syncedAt != null && !error;
   const syncLabel =
-    syncedAt == null ? "not synced" : now - syncedAt < 2000 ? "live" : `${Math.floor((now - syncedAt) / 1000)}s ago`;
+    syncedAt == null ? "connecting…" : now - syncedAt < 2500 ? "live" : `${Math.floor((now - syncedAt) / 1000)}s ago`;
+  const projectCount = snapshots.length;
+  const activeProjects = snapshots.filter((snap) => {
+    const stage = snap.project.stage;
+    const busy = snap.tasks.some((task) =>
+      ["in_progress", "in_review", "ready", "escalated", "blocked", "gated"].includes(task.state),
+    );
+    return busy || stage !== "tasks_ready";
+  }).length;
 
   return (
-    <main className="office-page min-h-screen px-6 pb-16 pt-10">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-end justify-between gap-6">
+    <main className="office-page min-h-screen px-4 pb-16 pt-8 md:px-6 md:pt-10">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-6">
         <div>
           <Link href="/" className="text-xs uppercase tracking-[0.22em] text-oxide">
             Atelier
           </Link>
-          <h1 className="font-serif mt-3 text-4xl leading-none md:text-5xl">Coders Alley</h1>
-          <p className="mt-3 max-w-xl text-muted">
-            Live work status from the API. Off-duty: coffee, foosball, patio smokes when idle or
-            stressed, office dog, paper planes, microwave raids, naps, and victory dances.
+          <h1 className="font-serif mt-3 text-4xl leading-none tracking-tight text-[#1c1915] md:text-6xl">
+            Coders Alley
+          </h1>
+          <p className="mt-3 max-w-xl text-[#3f3124]/85">
+            Overall floor status across every project — desks light up from the hottest work in
+            Atelier, not one board at a time.
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2 text-sm">
-          <label className="text-xs uppercase tracking-[0.18em] text-muted">Live project</label>
-          <select
-            value={selected}
-            onChange={(event) => setSelected(event.target.value)}
-            className="min-w-[14rem] border border-line bg-[#fffaf2] px-3 py-2"
-          >
-            <option value="">Idle preview (pick a project)</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-muted">
-            Sync: <span className={live ? "text-moss" : ""}>{live ? syncLabel : "demo idle"}</span>
+        <div className="flex flex-col items-end gap-1 text-sm">
+          <p className="text-xs uppercase tracking-[0.18em] text-[#3f3124]/70">Atelier overall</p>
+          <p className="font-medium text-[#1c1915]">
+            {projectCount === 0
+              ? "No projects yet"
+              : `${projectCount} project${projectCount === 1 ? "" : "s"} · ${activeProjects} active`}
           </p>
-          {selected ? (
-            <Link href={`/projects/${selected}`} className="text-oxide underline-offset-4 hover:underline">
-              Open project board
-            </Link>
-          ) : null}
+          <p className="text-xs text-[#3f3124]/70">
+            Sync: <span className={live ? "text-moss" : ""}>{syncLabel}</span>
+          </p>
+          <Link href="/" className="text-oxide underline-offset-4 hover:underline">
+            All projects
+          </Link>
         </div>
       </div>
 
-      {error ? <p className="mx-auto mt-6 max-w-5xl text-sm text-oxide">{error}</p> : null}
+      {error ? <p className="mx-auto mt-6 max-w-6xl text-sm text-oxide">{error}</p> : null}
 
-      <div className="mt-10">
+      <div className="mt-8 md:mt-10">
         <OfficeScene3D agents={agents} funTime={funTime} />
       </div>
 
-      <section className="mx-auto mt-8 grid max-w-5xl gap-4 lg:grid-cols-[1.4fr_1fr]">
-        <div className="border border-line bg-[#fffaf2]/80">
-          <div className="flex items-center justify-between border-b border-line px-4 py-2 text-xs uppercase tracking-[0.16em] text-muted">
+      <section className="mx-auto mt-8 grid max-w-6xl gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <div className="border border-[#2a2118]/20 bg-[#fffaf2]/88 shadow-sm backdrop-blur-sm">
+          <div className="flex items-center justify-between border-b border-[#2a2118]/15 px-4 py-2 text-xs uppercase tracking-[0.16em] text-muted">
             <span>Desk status</span>
-            <span>{live ? `API ${syncLabel}` : "Select a project for live status"}</span>
+            <span>
+              {projectCount === 0 ? "Waiting for a project" : `Merged from ${projectCount} project${projectCount === 1 ? "" : "s"} · ${syncLabel}`}
+            </span>
           </div>
           <ul className="divide-y divide-line">
             {agents.map((agent) => {
@@ -177,26 +174,47 @@ function OfficeInner() {
                   </div>
                   <p className={`text-sm ${t.className}`}>{t.label}</p>
                   <p className="text-sm text-muted">
-                    {agent.dialogue ? (
-                      <span className="text-ink">“{agent.dialogue}”</span>
-                    ) : agent.funLabel ? (
-                      <span className="text-ink">{agent.funLabel}</span>
-                    ) : (
-                      <>
-                        {agent.taskKey ? <span className="text-ink">{agent.taskKey} · </span> : null}
-                        {agent.activity}
-                      </>
-                    )}
+                    {agent.taskKey ? <span className="text-ink">{agent.taskKey} · </span> : null}
+                    <span className="text-ink">{agent.activity}</span>
+                    {agent.funLabel ? (
+                      <span className="mt-0.5 block text-xs text-muted">Break: {agent.funLabel}</span>
+                    ) : null}
                   </p>
                   <p className="text-xs text-muted md:text-right">{ago(agent.updatedAt)}</p>
                 </li>
               );
             })}
           </ul>
+          <div className="flex items-center justify-between border-y border-[#2a2118]/15 px-4 py-2 text-xs uppercase tracking-[0.16em] text-muted">
+            <span>Floor staff</span>
+            <span>Always on the floor</span>
+          </div>
+          <ul className="divide-y divide-line">
+            {staff.map((person) => (
+              <li
+                key={person.id}
+                className="grid gap-1 px-4 py-3 md:grid-cols-[11rem_6rem_1fr_6rem] md:items-center"
+              >
+                <div>
+                  <p className="font-medium">{person.label}</p>
+                  <p className="text-xs text-muted">
+                    {person.roleTitle}
+                    <span className="text-muted/80">
+                      {" "}
+                      · {person.gender === "female" ? "Female" : "Male"}
+                    </span>
+                  </p>
+                </div>
+                <p className="text-sm text-moss">On duty</p>
+                <p className="text-sm text-ink">{person.dutyLabel}</p>
+                <p className="text-xs text-muted md:text-right">floor</p>
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <div className="border border-line bg-[#fffaf2]/80">
-          <div className="border-b border-line px-4 py-2 text-xs uppercase tracking-[0.16em] text-muted">
+        <div className="border border-[#2a2118]/20 bg-[#fffaf2]/88 shadow-sm backdrop-blur-sm">
+          <div className="border-b border-[#2a2118]/15 px-4 py-2 text-xs uppercase tracking-[0.16em] text-muted">
             Alley chatter
           </div>
           <ul className="max-h-[22rem] space-y-3 overflow-auto px-4 py-3">

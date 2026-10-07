@@ -1387,12 +1387,9 @@ class PlanningService:
         return f"FR-{max(numbers, default=0) + 1:03d}"
 
     def _check_test_strategy(self, strategy: dict) -> None:
-        missing = [name for name in ("unit", "integration", "ui") if not str(strategy.get(name, "")).strip()]
-        if missing:
-            raise DomainError(
-                "The architecture must name commands for: " + ", ".join(missing),
-                status_code=422,
-            )
+        from app.domain.test_strategy import validate_test_strategy
+
+        validate_test_strategy(strategy)
 
     def _transcript(self, project: Project) -> str:
         lines = [

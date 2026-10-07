@@ -61,11 +61,12 @@ def architecture_prompt(context: str) -> tuple[str, str]:
         "Zones are only backend, frontend, and ai_engineer. "
         "Declare the exact commands that run unit, integration, and ui tests. "
         "Each command is one program plus arguments (no shell chaining). "
-        "Checks run offline in a short-lived container with a read-only project mount, "
-        "so do not rely on package installs. Prefer self-contained smoke commands such as "
+        "Commands must exercise acceptance behaviour (HTTP status/body, module asserts, "
+        "served HTML/JS contracts) — never placeholder smokes like "
         "python3 -c \"print('unit ok')\" or node -e \"console.log('unit ok')\". "
-        "Only use npm run … when package.json (and any needed files) already live in the tree "
-        "and the scripts need no network install. "
+        "Prefer entrypoints such as node scripts/verify.js, npm test, or python -m pytest. "
+        "Declared package.json / requirements.txt dependencies are installed in a writable "
+        "sandbox copy before checks run; the verify commands themselves then run offline. "
         + JSON_RULES
         + "\nShape: {"
         '"summary": string, '

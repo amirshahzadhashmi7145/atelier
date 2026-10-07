@@ -178,7 +178,7 @@ export default function HomePage() {
                       <span className="text-sm text-muted">{project.stage.replaceAll("_", " ")}</span>
                     </Link>
                     <Link
-                      href={`/office?project=${project.id}`}
+                      href="/office"
                       className="shrink-0 text-sm text-oxide underline-offset-4 hover:underline"
                     >
                       Watch

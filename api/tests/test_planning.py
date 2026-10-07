@@ -433,3 +433,31 @@ class _CyclicTasks(FakeLlm):
                 model=self.model,
             )
         return super().complete_json(purpose=purpose, system=system, user=user)
+
+
+class _PlaceholderTests(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        result = super().complete_json(purpose=purpose, system=system, user=user)
+        if purpose == "architecture":
+            result.data["test_strategy"] = {
+                "unit": 'node -e "console.log(\'unit ok\')"',
+                "integration": 'node -e "console.log(\'integration ok\')"',
+                "ui": 'node -e "console.log(\'ui ok\')"',
+            }
+        return result
+
+
+def test_architecture_rejects_placeholder_test_smokes():
+    client = client_for(_PlaceholderTests())
+    project_id = _create(client)
+    client.post(f"/api/projects/{project_id}/interpret")
+    _answer_open(client, project_id)
+    client.post(f"/api/projects/{project_id}/requirements")
+    client.post(
+        f"/api/projects/{project_id}/gates",
+        json={"gate": "requirements", "decision": "approved"},
+    )
+    refused = client.post(f"/api/projects/{project_id}/architecture")
+    assert refused.status_code == 422, refused.text
+    assert "placeholder" in refused.json()["detail"].lower()
+
