@@ -56,7 +56,8 @@ export default function HomePage() {
             <span className="block text-muted">Watch the team build.</span>
           </h1>
           <p className="mt-5 max-w-lg text-lg leading-relaxed text-muted">
-            PM plans. Engineers take desks by zone. QA reviews. You approve the gates that matter.
+            PM plans. Engineers take desks by zone. Staff reviews every branch. QA judges criteria.
+            You approve the gates that matter.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <a

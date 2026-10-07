@@ -206,16 +206,9 @@ def test_automatic_merge_gate_accepts_after_review(tmp_path: Path):
     project_id = _prepare(client)
     policy = client.post(
         f"/api/projects/{project_id}/gate-policy",
-        json={
-            "gate_policy": {"merge": "automatic"},
-            "acknowledgement": "I accept unattended merges for this project.",
-        },
+        json={"gate_policy": {"merge": "automatic"}},
     )
     assert policy.status_code == 200, policy.text
-    assert any(
-        event["type"] == "project.gate_policy" and event["payload"].get("acknowledgement")
-        for event in policy.json()["events"]
-    )
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
     assert ran.status_code == 200, ran.text
     body = ran.json()
@@ -236,10 +229,7 @@ def test_automatic_merge_sends_untestable_criteria_back(tmp_path: Path):
     project_id = _prepare(client)
     policy = client.post(
         f"/api/projects/{project_id}/gate-policy",
-        json={
-            "gate_policy": {"merge": "automatic"},
-            "acknowledgement": "I accept unattended merges for this project.",
-        },
+        json={"gate_policy": {"merge": "automatic"}},
     )
     assert policy.status_code == 200, policy.text
     ran = client.post(f"/api/projects/{project_id}/tasks/run")

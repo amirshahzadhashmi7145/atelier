@@ -43,9 +43,12 @@ def implement_prompt(
         "response fields from the criteria so the review can mark them pass. "
         "Keep existing passing harness or feature tests; extend them for this task's "
         "criteria instead of deleting them. "
-        "CRITICAL: never rewrite an existing module from scratch. Start from the file "
-        "contents provided below, keep every existing endpoint/helper/export (including "
-        "test helpers like reset_store), and only ADD your task's code and tests. "
+        "CRITICAL — edit like Cursor, do not clobber: for files that already exist, prefer "
+        "edits (search/replace) over full writes. old_string must match exactly once. "
+        "If you must use writes on an existing .py file, copy the existing contents forward "
+        "and only ADD your task's code (keep helpers like reset_store). The runtime also "
+        "re-attaches any top-level symbols a rewrite drops, but do not rely on that. "
+        "New files may use writes with full content. "
         "The full suite still runs — breaking earlier tasks fails this run. "
         "On the first implementation that introduces tests, also write the manifests the "
         "architecture's commands need: requirements.txt (include pytest when using "
@@ -59,7 +62,8 @@ def implement_prompt(
         + JSON_RULES
         + '\nShape: {"summary": string, "done": boolean, '
         '"needs_clarification": boolean, "clarification": string, '
-        '"writes": [{"path": string, "content": string}]}'
+        '"writes": [{"path": string, "content": string}], '
+        '"edits": [{"path": string, "old_string": string, "new_string": string}]}'
     )
     user = (
         f"Zone: {zone}\n"

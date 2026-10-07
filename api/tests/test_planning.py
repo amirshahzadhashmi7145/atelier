@@ -220,27 +220,18 @@ def test_project_status_summarises_tasks_and_open_gates():
     assert {"role", "state"} <= set(status["agents"][0])
 
 
-def test_automatic_merge_needs_an_acknowledgement():
+def test_automatic_merge_does_not_need_an_acknowledgement():
     client = client_for()
     project_id = _create(client)
-    refused = client.post(
-        f"/api/projects/{project_id}/gate-policy",
-        json={"gate_policy": {"merge": "automatic"}},
-    )
-    assert refused.status_code == 422
-    assert "acknowledgement" in refused.json()["detail"].lower()
     accepted = client.post(
         f"/api/projects/{project_id}/gate-policy",
-        json={
-            "gate_policy": {"merge": "automatic"},
-            "acknowledgement": "I accept unattended merges.",
-        },
+        json={"gate_policy": {"merge": "automatic"}},
     )
     assert accepted.status_code == 200, accepted.text
     body = accepted.json()
     assert body["project"]["gate_policy"]["merge"] == "automatic"
     event = next(item for item in body["events"] if item["type"] == "project.gate_policy")
-    assert event["payload"]["acknowledgement"] == "I accept unattended merges."
+    assert "acknowledgement" not in event["payload"]
 
 
 def test_automatic_requirements_gate_approves_without_a_person():
