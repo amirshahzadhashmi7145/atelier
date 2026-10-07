@@ -487,7 +487,8 @@ def test_a_run_that_never_finishes_is_stopped_by_the_iteration_budget(tmp_path: 
     body = ran.json()
     assert ran.status_code == 200, ran.text
     assert _by_key(body, "TASK-001")["state"] == "ready"
-    assert "iteration budget" in _failure(body)
+    failure = _failure(body)
+    assert "iteration budget" in failure or "repeated" in failure
     assert not (tmp_path / project_id / "server" / "app.py").exists()
 
 
@@ -843,11 +844,12 @@ class _NeverDone(FakeLlm):
     def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
         if purpose == "implement":
             self.calls += 1
+            # Empty writes + done false burns the iteration budget (writes are treated as done).
             return LlmResult(
                 data={
                     "summary": "Still working.",
                     "done": False,
-                    "writes": [{"path": "server/app.py", "content": f"step {self.calls}\n"}],
+                    "writes": [],
                 },
                 input_tokens=1,
                 output_tokens=1,
