@@ -18,6 +18,7 @@ from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
 from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
+from app.domain.ac_evidence import blob_from_test_writes, evidence_gaps
 from app.domain.dependencies import dependency_files, forbidden_dependency_sources
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
@@ -932,6 +933,49 @@ class ExecutionService:
                     "; ".join(f"{item.tier} exited {item.exit_code}" for item in failed_checks)
                     + ". Declared tests must pass before a commit."
                 )
+            # Green harnesses are not enough — excerpts/tests must name AC signals.
+            try:
+                criteria_rows = self._criteria(project, task)
+            except DomainError:
+                criteria_rows = []
+            if criteria_rows:
+                corpus_checks = "\n".join(
+                    f"{item.tier}\n{item.excerpt}" for item in checks
+                )
+                on_disk = []
+                for path in workspace.root.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    rel = path.relative_to(workspace.root).as_posix()
+                    if any(
+                        part in {".git", ".deps", "node_modules", "__pycache__"}
+                        for part in path.parts
+                    ):
+                        continue
+                    try:
+                        on_disk.append((rel, path.read_text(encoding="utf-8")))
+                    except OSError:
+                        continue
+                gaps = evidence_gaps(
+                    criteria_rows,
+                    check_excerpts=corpus_checks,
+                    write_contents=blob_from_test_writes(writes)
+                    + "\n"
+                    + blob_from_test_writes(on_disk),
+                )
+                if gaps:
+                    try:
+                        workspace.discard()
+                    except RuntimeError as exc:
+                        raise DomainError(
+                            f"The failed change could not be discarded: {exc}"
+                        ) from exc
+                    raise DomainError(
+                        "Tests pass but do not evidence "
+                        + ", ".join(gaps)
+                        + ". Assert the status codes and response fields from those "
+                        "criteria in unit/integration/ui tests, then try again."
+                    )
             try:
                 workspace.commit_staged(task.key, summary, role=task.zone, run_id=run_id)
             except RuntimeError as exc:
