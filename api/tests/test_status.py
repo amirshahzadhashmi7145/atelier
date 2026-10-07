@@ -64,7 +64,20 @@ def test_agent_states_reflect_active_zones():
         ("backend", "working"),
         ("frontend", "waiting"),
         ("ai_engineer", "idle"),
+        ("fullstack", "idle"),
         ("qa", "idle"),
+    ]
+
+    assert agent_states(
+        stage="tasks_ready",
+        tasks=[_Task("TASK-001", "in_review", zone="backend")],
+    ) == [
+        ("pm", "idle"),
+        ("backend", "waiting"),
+        ("frontend", "idle"),
+        ("ai_engineer", "idle"),
+        ("fullstack", "working"),
+        ("qa", "waiting"),
     ]
 
 

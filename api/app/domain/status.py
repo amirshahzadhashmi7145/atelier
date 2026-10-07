@@ -7,7 +7,7 @@ same rows the orchestrator already stores. The UI does not invent them.
 from collections import Counter
 
 
-AGENT_ROLES = ("pm", "backend", "frontend", "ai_engineer", "qa")
+AGENT_ROLES = ("pm", "backend", "frontend", "ai_engineer", "fullstack", "qa")
 
 
 def task_counts(tasks: list) -> dict[str, int]:
@@ -73,10 +73,13 @@ def agent_states(*, stage: str, tasks: list) -> list[tuple[str, str]]:
         elif task.state == "in_review":
             if states[zone] != "working":
                 states[zone] = "waiting"
-            states["qa"] = "working"
+            states["fullstack"] = "working"
+            states["qa"] = "waiting"
         elif task.state == "gated":
             if states[zone] != "working":
                 states[zone] = "waiting"
+            if states["fullstack"] != "working":
+                states["fullstack"] = "waiting"
             if states["qa"] != "working":
                 states["qa"] = "waiting"
         elif task.state == "ready" and states[zone] == "idle":

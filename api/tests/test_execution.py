@@ -624,7 +624,7 @@ def test_an_untestable_criterion_stays_in_review(tmp_path: Path):
     reviewed = client.post(f"/api/projects/{project_id}/tasks/{task_id}/review")
     assert reviewed.status_code == 200, reviewed.text
     assert _by_key(reviewed.json(), "TASK-001")["state"] == "in_review"
-    assert reviewed.json()["findings"][0]["result"] == "untestable"
+    assert any(item["result"] == "untestable" for item in reviewed.json()["findings"])
     accepted = client.post(f"/api/projects/{project_id}/tasks/{task_id}/accept")
     assert accepted.status_code == 409
 
@@ -798,10 +798,19 @@ class _FailFirstCriterion(FakeLlm):
 
 class _Untestable(FakeLlm):
     def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "requirements":
+            result = super().complete_json(purpose=purpose, system=system, user=user)
+            # Needle-less AC so staff evidence cannot auto-pass it when QA
+            # honestly marks the check as untestable in this environment.
+            result.data["requirements"][0]["criteria"].append(
+                "Wall-clock behaviour matches the product brief on a live clock."
+            )
+            return result
         if purpose == "qa":
             result = super().complete_json(purpose=purpose, system=system, user=user)
-            result.data["findings"][0]["result"] = "untestable"
-            result.data["findings"][0]["note"] = "No clock is available in this run."
+            for item in result.data["findings"]:
+                item["result"] = "untestable"
+                item["note"] = "No clock is available in this run."
             return result
         return super().complete_json(purpose=purpose, system=system, user=user)
 
@@ -889,7 +898,16 @@ class _SameChange(FakeLlm):
                 data={
                     "summary": "Again.",
                     "done": False,
-                    "writes": [{"path": "server/app.py", "content": "same\n"}],
+                    "writes": [
+                        {"path": "server/app.py", "content": "same\n"},
+                        {
+                            "path": "server/test_app.py",
+                            "content": (
+                                "def test_same() -> None:\n"
+                                "    assert {201, 401, 404, 413, 422, 200}\n"
+                            ),
+                        },
+                    ],
                 },
                 input_tokens=1,
                 output_tokens=1,

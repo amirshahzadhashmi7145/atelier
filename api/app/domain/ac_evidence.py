@@ -34,7 +34,6 @@ def evidence_gaps(
         needles = _needles(statement)
         if not needles:
             continue
-        missing = [token for token in needles if token.lower() not in corpus]
         # Pass when every status code is present, or (for field lists) most fields.
         statuses = [n for n in needles if n.isdigit()]
         fields = [n for n in needles if not n.isdigit()]
@@ -48,6 +47,30 @@ def evidence_gaps(
             continue
         gaps.append(key)
     return gaps
+
+
+def evidenced_keys(
+    criteria: list[tuple[str, str]],
+    *,
+    check_excerpts: str,
+    write_contents: str,
+) -> set[str]:
+    """Keys that declare extractable signals and are fully covered by tests/checks."""
+
+    gaps = set(
+        evidence_gaps(
+            criteria,
+            check_excerpts=check_excerpts,
+            write_contents=write_contents,
+        )
+    )
+    covered: set[str] = set()
+    for key, statement in criteria:
+        if not _needles(statement):
+            continue
+        if key not in gaps:
+            covered.add(key)
+    return covered
 
 
 def _needles(statement: str) -> list[str]:
