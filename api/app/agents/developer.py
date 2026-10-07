@@ -37,10 +37,15 @@ def implement_prompt(
         "Declared tests run on your writes before commit. Add or update verify scripts that "
         "assert the linked acceptance criteria (HTTP status/body, module behaviour, or that "
         "the served page loads its real script and talks to the API). "
+        "On the first implementation that introduces tests, also write the manifests the "
+        "architecture's commands need: requirements.txt (include pytest when using "
+        "python -m pytest) and/or package.json with a working test script when using npm. "
+        "Put test files on the paths the architecture named (e.g. tests/unit or "
+        "server/tests/unit). "
         "Wire the UI to the backend: do not leave missing entrypoints (e.g. script.js) or "
         "unused React islands the HTML never loads. "
         "If the project uses npm, keep package.json scripts runnable after install "
-        "(Atelier installs dependencies before checks). "
+        "(Atelier installs dependencies into the sandbox before checks). "
         + JSON_RULES
         + '\nShape: {"summary": string, "done": boolean, '
         '"needs_clarification": boolean, "clarification": string, '

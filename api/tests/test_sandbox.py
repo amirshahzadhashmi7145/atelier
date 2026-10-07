@@ -102,6 +102,7 @@ def test_run_checks_uses_the_sandbox_when_configured(tmp_path: Path):
 
 
 def test_run_checks_uses_the_node_image_for_npm(tmp_path: Path):
+    (tmp_path / "package.json").write_text('{"name":"demo","scripts":{"test:unit":"node -e 0"}}', encoding="utf-8")
     images: list[str] = []
 
     def fake_sandbox(root, argv, **kwargs):
@@ -156,6 +157,62 @@ def test_run_checks_installs_npm_deps_before_verify(tmp_path: Path):
     assert calls[0][1]["image"] == "node:20-slim"
     assert len(calls) == 4
     assert all(call[1].get("network") is False for call in calls[1:])
+
+
+def test_run_checks_installs_pytest_into_workspace_deps(tmp_path: Path):
+    (tmp_path / "requirements.txt").write_text("flask==3.0.0\n", encoding="utf-8")
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_sandbox(root, argv, **kwargs):
+        calls.append((list(argv), dict(kwargs)))
+        if argv[:2] == ["pip", "install"]:
+            (root / ".deps").mkdir(exist_ok=True)
+        return 0, "ok"
+
+    with patch("app.services.checks.run_in_sandbox", side_effect=fake_sandbox):
+        results = run_checks(
+            tmp_path,
+            {
+                "unit": "python3 -m pytest tests/unit",
+                "integration": "python3 -m pytest tests/integration",
+                "ui": "python3 -c \"print('ui')\"",
+            },
+            timeout=5,
+            sandbox=SandboxOptions(image="python:3.12-slim"),
+        )
+
+    assert all(item.exit_code == 0 for item in results)
+    assert calls[0][0][:4] == ["pip", "install", "--no-cache-dir", "--target"]
+    assert "/workspace/.deps" in calls[0][0]
+    assert "-r" in calls[0][0]
+    assert "pytest" in calls[0][0]
+    assert calls[0][1].get("network") is True
+    # Verify runs see PYTHONPATH into the persisted deps tree.
+    assert calls[1][1].get("env", {}).get("PYTHONPATH") == "/workspace/.deps"
+
+
+def test_run_checks_fails_clearly_when_npm_strategy_has_no_package_json(tmp_path: Path):
+    calls: list[list[str]] = []
+
+    def fake_sandbox(root, argv, **kwargs):
+        calls.append(list(argv))
+        return 0, "ok"
+
+    with patch("app.services.checks.run_in_sandbox", side_effect=fake_sandbox):
+        results = run_checks(
+            tmp_path,
+            {
+                "unit": "python3 -c \"print('unit')\"",
+                "integration": "python3 -c \"print('integration')\"",
+                "ui": "npm test -- --watchAll=false",
+            },
+            timeout=5,
+            sandbox=SandboxOptions(image="python:3.12-slim", node_image="node:20-slim"),
+        )
+
+    assert calls == []
+    assert all(item.exit_code == 1 for item in results)
+    assert "package.json" in results[0].excerpt
 
 
 def test_sandbox_install_mode_allows_network_and_writable_mount(tmp_path: Path):
