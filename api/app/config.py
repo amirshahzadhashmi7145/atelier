@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     run_max_iterations: int = 8
-    run_max_seconds: float = 60
+    run_max_seconds: float = 180
     run_max_tokens: int = 20000
     check_timeout_seconds: int = 20
     check_sandbox: bool = True

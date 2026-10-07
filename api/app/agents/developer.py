@@ -25,6 +25,8 @@ def implement_prompt(
         "Use the linked requirements and acceptance criteria as the source of truth. "
         "Only set needs_clarification true when those criteria truly cannot answer the "
         "question; do not ask for details already listed below. "
+        "Never set needs_clarification for timeouts, retries, or missing tests — implement "
+        "from the criteria instead. "
         "If clarifying, put one concrete question in clarification, leave writes empty, "
         "and set done false. "
         "Declared tests run on your writes before commit: if the project uses npm scripts, "

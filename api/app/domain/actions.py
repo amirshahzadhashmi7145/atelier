@@ -27,6 +27,7 @@ _DECISIONS = {
 _ARTEFACTS = {
     "project.created",
     "project.github_repo",
+    "project.github_pushed",
     "pr.opened",
     "task.in_review",
     "task.defect_routed",
