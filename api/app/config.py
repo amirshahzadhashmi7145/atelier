@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     run_max_iterations: int = 16
     run_max_seconds: float = 300
     run_max_tokens: int = 40000
-    check_timeout_seconds: int = 20
+    check_timeout_seconds: int = 120
     check_sandbox: bool = True
     sandbox_image: str = "python:3.12-slim"
     sandbox_node_image: str = "node:20-slim"

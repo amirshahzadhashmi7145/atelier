@@ -34,8 +34,13 @@ def implement_prompt(
         "from the criteria instead. "
         "If clarifying, put one concrete question in clarification, leave writes empty, "
         "and set done false. "
-        "Declared tests run on your writes before commit: if the project uses npm scripts, "
-        "include a package.json (in-zone) whose scripts run offline without installs. "
+        "Declared tests run on your writes before commit. Add or update verify scripts that "
+        "assert the linked acceptance criteria (HTTP status/body, module behaviour, or that "
+        "the served page loads its real script and talks to the API). "
+        "Wire the UI to the backend: do not leave missing entrypoints (e.g. script.js) or "
+        "unused React islands the HTML never loads. "
+        "If the project uses npm, keep package.json scripts runnable after install "
+        "(Atelier installs dependencies before checks). "
         + JSON_RULES
         + '\nShape: {"summary": string, "done": boolean, '
         '"needs_clarification": boolean, "clarification": string, '

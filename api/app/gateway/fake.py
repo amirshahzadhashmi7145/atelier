@@ -122,9 +122,20 @@ def _architecture(user: str) -> dict:
             "client may import but not edit."
         ),
         "test_strategy": {
-            "unit": "python3 -c \"print('unit ok')\"",
-            "integration": "python3 -c \"print('integration ok')\"",
-            "ui": "python3 -c \"print('ui ok')\"",
+            "unit": (
+                "python3 -c \"from pathlib import Path; "
+                "assert Path('server').is_dir(), 'server zone missing'\""
+            ),
+            "integration": (
+                "python3 -c \"from pathlib import Path; "
+                "p = Path('server/app.py'); "
+                "assert p.is_file() or Path('server').is_dir(), 'no server code'\""
+            ),
+            "ui": (
+                "python3 -c \"from pathlib import Path; "
+                "assert Path('web').is_dir() or Path('server').is_dir(), "
+                "'no client or server tree'\""
+            ),
         },
         "ownership": ownership,
         "decisions": [

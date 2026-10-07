@@ -231,7 +231,7 @@ def test_automatic_merge_gate_accepts_after_review(tmp_path: Path):
     )
 
 
-def test_automatic_merge_auto_waives_untestable_criteria(tmp_path: Path):
+def test_automatic_merge_sends_untestable_criteria_back(tmp_path: Path):
     client = client_for(tmp_path, _Untestable())
     project_id = _prepare(client)
     policy = client.post(
@@ -246,11 +246,11 @@ def test_automatic_merge_auto_waives_untestable_criteria(tmp_path: Path):
     assert ran.status_code == 200, ran.text
     body = ran.json()
     task = _by_key(body, "TASK-001")
-    assert task["state"] == "done"
-    task_findings = [item for item in body["findings"] if item["task_id"] == task["id"]]
-    assert any(item["result"] == "waived" for item in task_findings)
-    assert any(event["type"] == "qa.waived" and event["actor_kind"] == "system" for event in body["events"])
-    assert "TASK-001 untestable" not in body["project"]["status"]["needs_you"]
+    assert task["state"] == "ready"
+    assert any(defect["task_id"] == task["id"] for defect in body["defects"])
+    assert any(event["type"] == "qa.untestable" for event in body["events"])
+    assert any(event["type"] == "qa.rejected_untestable" for event in body["events"])
+    assert not any(event["type"] == "qa.waived" for event in body["events"])
 
 
 def test_a_rebase_conflict_on_accept_sends_the_task_back(tmp_path: Path):
@@ -771,7 +771,11 @@ class _ChainedTest(FakeLlm):
     def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
         result = super().complete_json(purpose=purpose, system=system, user=user)
         if purpose == "architecture":
-            result.data["test_strategy"]["unit"] = "python3 -c \"print('ok')\" && touch chained.txt"
+            # Non-trivial body so architecture accepts; shell chaining is rejected at run time.
+            result.data["test_strategy"]["unit"] = (
+                "python3 -c \"from pathlib import Path; assert Path('.').exists()\" "
+                "&& touch chained.txt"
+            )
         return result
 
 

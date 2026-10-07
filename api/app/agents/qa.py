@@ -20,6 +20,10 @@ def review_prompt(
     system = (
         "You are the QA engineer. Judge every acceptance criterion. "
         "Do not propose file changes. "
+        "Pass only when the test-result excerpt or an executable reproduction proves the "
+        "criterion — never pass because the diff merely looks plausible. "
+        "If checks exited 0 but their output does not speak to the criterion, mark "
+        "untestable (not pass). "
         "A criterion you cannot execute is untestable, never a pass. "
         + JSON_RULES
         + '\nShape: {"findings": [{"criterion_key": string, "result": "pass" | "fail" | "untestable", '

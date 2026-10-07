@@ -28,8 +28,69 @@ button:disabled {
 
 .office-page {
   background:
-    linear-gradient(180deg, rgba(243, 239, 230, 0.2), rgba(243, 239, 230, 0.85)),
-    radial-gradient(ellipse at 50% 0%, #efe6d6 0%, transparent 55%);
+    radial-gradient(ellipse at 20% 0%, rgba(232, 165, 75, 0.12), transparent 45%),
+    radial-gradient(ellipse at 80% 10%, rgba(126, 184, 201, 0.1), transparent 40%),
+    linear-gradient(180deg, #c4b49a 0%, #b8a890 35%, #f3efe6 100%);
+}
+
+.office-stage {
+  border: 1px solid color-mix(in srgb, var(--color-line) 80%, #2a2118);
+  box-shadow:
+    0 28px 60px -28px rgba(28, 25, 21, 0.55),
+    inset 0 0 0 1px rgba(255, 246, 224, 0.12);
+  background: #b8a890;
+}
+
+.office-stage-vignette {
+  background:
+    radial-gradient(ellipse at 50% 40%, transparent 45%, rgba(28, 25, 21, 0.28) 100%),
+    linear-gradient(180deg, rgba(28, 25, 21, 0.08), transparent 30%, transparent 70%, rgba(28, 25, 21, 0.18));
+}
+
+.office-neon {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.15rem;
+  letter-spacing: 0.28em;
+  color: #ffe2a8;
+  text-shadow:
+    0 0 8px rgba(232, 165, 75, 0.9),
+    0 0 22px rgba(232, 165, 75, 0.55);
+  white-space: nowrap;
+}
+
+.office-nameplate {
+  min-width: 7.2rem;
+  border: 1px solid #2a2420;
+  background: linear-gradient(180deg, #fffaf2, #f3ebe0);
+  padding: 0.3rem 0.5rem;
+  text-align: center;
+  box-shadow: 0 8px 18px -12px rgba(28, 25, 21, 0.7);
+}
+
+.office-nameplate .name {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+  color: #1c1915;
+}
+
+.office-nameplate .role {
+  margin: 0.1rem 0 0;
+  font-size: 9px;
+  color: #6f675e;
+}
+
+.office-menu-board {
+  color: #f3efe6;
+  font-size: 0.45rem;
+  letter-spacing: 0.12em;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.office-menu-board p {
+  margin: 0;
 }
 
 .office-floor {
@@ -226,15 +287,17 @@ button:disabled {
 
 .office-speech {
   position: relative;
-  max-width: 11rem;
-  padding: 0.4rem 0.55rem;
-  border: 1px solid #e3dacd;
-  background: rgba(255, 250, 242, 0.95);
-  color: #1c1915;
-  font-size: 0.68rem;
-  line-height: 1.3;
-  box-shadow: 0 10px 24px -16px rgba(28, 25, 21, 0.75);
-  animation: speech-pop 0.25s ease-out;
+  max-width: 12rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(60, 48, 36, 0.12);
+  border-radius: 0.35rem;
+  background: rgba(255, 252, 247, 0.92);
+  color: #2a2218;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px -14px rgba(28, 25, 21, 0.55);
+  animation: speech-pop 0.35s ease-out;
 }
 
 .office-speech p {
