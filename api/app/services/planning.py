@@ -310,7 +310,37 @@ class PlanningService:
                 ),
             },
         )
+        self._push_main_if_present(project)
         return self.snapshot(project_id)
+
+    def _push_main_if_present(self, project: Project) -> None:
+        """When a workspace already has commits, publish main immediately."""
+
+        from pathlib import Path
+
+        from app.services.workspace import Workspace
+
+        token = self.settings.github_token.strip()
+        if not project.github_repo or not token:
+            return
+        root = Path(self.settings.workspaces_dir) / project.id
+        if not (root / ".git").exists():
+            return
+        remote = f"https://x-access-token:{token}@github.com/{project.github_repo}.git"
+        try:
+            Workspace(root).push(remote, "main")
+        except RuntimeError:
+            return
+        self._event(
+            project,
+            "project.github_pushed",
+            actor_kind="system",
+            payload={
+                "github_repo": project.github_repo,
+                "branches": ["main"],
+                "summary": f"Pushed main to {project.github_repo}.",
+            },
+        )
 
     def _create_github_repository(
         self,

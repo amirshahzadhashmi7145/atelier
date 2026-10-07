@@ -368,6 +368,7 @@ class ExecutionService:
             workspace.merge(task.branch_name, task.key)
         except RuntimeError as exc:
             raise DomainError(f"The branch could not be merged: {exc}") from exc
+        self._publish_github(project, workspace, "main")
         task.state, task.retry_count = self._move(task, TaskState.DONE)
         for item in project.pull_requests:
             if item.task_id == task.id and item.state == "open":
@@ -1029,16 +1030,11 @@ class ExecutionService:
             state="open",
         )
         if project.github_repo and self.settings.github_token.strip():
-            remote = (
-                f"https://x-access-token:{self.settings.github_token}"
-                f"@github.com/{project.github_repo}.git"
-            )
             try:
                 # Empty repos have no default branch until main is pushed.
-                workspace.push(remote, "main")
-                workspace.push(remote, task.branch_name)
-            except RuntimeError as exc:
-                raise DomainError(f"The branch could not be pushed: {exc}") from exc
+                self._publish_github(project, workspace, "main", task.branch_name)
+            except DomainError:
+                raise
             remote_pr = github_api.open_pull_request(
                 api_url=self.settings.github_api_url,
                 token=self.settings.github_token,
@@ -1064,6 +1060,66 @@ class ExecutionService:
                 "summary": draft.title,
             },
         )
+
+    def _publish_github(self, project: Project, workspace: Workspace, *branches: str) -> None:
+        """Push the named branches so GitHub always mirrors the latest workspace."""
+
+        if not project.github_repo or not self.settings.github_token.strip():
+            return
+        if not branches:
+            return
+        remote = (
+            f"https://x-access-token:{self.settings.github_token}"
+            f"@github.com/{project.github_repo}.git"
+        )
+        try:
+            for branch in branches:
+                workspace.push(remote, branch)
+        except RuntimeError as exc:
+            raise DomainError(f"GitHub could not be updated: {exc}") from exc
+        self.planning._event(
+            project,
+            "project.github_pushed",
+            actor_kind="system",
+            payload={
+                "github_repo": project.github_repo,
+                "branches": list(branches),
+                "summary": (
+                    f"Pushed {', '.join(branches)} to {project.github_repo}."
+                ),
+            },
+        )
+
+    def sync_github(self, project_id: str) -> ProjectSnapshot:
+        """Push local main (and open task branches) so the remote matches now."""
+
+        project = self.planning._project(project_id)
+        require_active(paused=bool(project.paused))
+        if not project.github_repo:
+            raise DomainError(
+                "This project has no GitHub repository. Create or link one first.",
+                status_code=422,
+            )
+        if not self.settings.github_token.strip():
+            raise DomainError("GITHUB_TOKEN is required to update GitHub.", status_code=422)
+        workspace = Workspace(self._root(project))
+        try:
+            workspace.ensure()
+        except RuntimeError as exc:
+            raise DomainError(f"The workspace could not be prepared: {exc}") from exc
+        branches = ["main"]
+        for task in project.tasks:
+            if task.branch_name and task.state in {
+                TaskState.IN_REVIEW.value,
+                TaskState.GATED.value,
+                TaskState.IN_PROGRESS.value,
+                TaskState.READY.value,
+                TaskState.ESCALATED.value,
+            }:
+                if task.branch_name not in branches:
+                    branches.append(task.branch_name)
+        self._publish_github(project, workspace, *branches)
+        return self.planning.snapshot(project.id)
 
     def _escalate_for_clarification(self, project: Project, task: Task, question: str) -> None:
         """Stop inventing: hand an under-specified task to a person (FR-DEV-9)."""

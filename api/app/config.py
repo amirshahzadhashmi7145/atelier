@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     run_max_iterations: int = 8
-    run_max_seconds: float = 60
+    run_max_seconds: float = 180
     run_max_tokens: int = 20000
     check_timeout_seconds: int = 20
     check_sandbox: bool = True
@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     )
     default_spend_ceiling_tokens: int = 1_000_000
     spend_alert_thresholds: str = "50,80,95"
-    task_estimate_s_tokens: int = 2_000
-    task_estimate_m_tokens: int = 8_000
+    task_estimate_s_tokens: int = 12_000
+    task_estimate_m_tokens: int = 24_000
     spend_estimate_multiple: float = 2.0
     spend_estimate_margin: float = 1.5
     workspaces_dir: str = "./workspaces"

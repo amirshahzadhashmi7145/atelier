@@ -248,17 +248,29 @@ export default function ProjectPage() {
             <p className="mt-2 text-sm text-muted">Preferences: {project.tech_preferences}</p>
           ) : null}
           {project.github_repo ? (
-            <p className="mt-2 text-sm text-muted">
-              GitHub:{" "}
-              <a
-                className="underline"
-                href={`https://github.com/${project.github_repo}`}
-                target="_blank"
-                rel="noreferrer"
+            <div className="mt-2 space-y-2">
+              <p className="text-sm text-muted">
+                GitHub:{" "}
+                <a
+                  className="underline"
+                  href={`https://github.com/${project.github_repo}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {project.github_repo}
+                </a>
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                className="border border-ink px-3 py-2 text-sm"
+                onClick={() =>
+                  run(() => api(`/api/projects/${project.id}/github-sync`, { method: "POST" }))
+                }
               >
-                {project.github_repo}
-              </a>
-            </p>
+                Push latest to GitHub
+              </button>
+            </div>
           ) : (
             <div className="mt-3">
               <button
@@ -1069,7 +1081,7 @@ export default function ProjectPage() {
                     {task.state === "escalated" ? (
                       <div className="mt-2 space-y-2 border border-oxide-soft bg-oxide-soft/40 p-3">
                         {(() => {
-                          const question = [...snapshot.events]
+                          const clarification = [...snapshot.events]
                             .reverse()
                             .find(
                               (event) =>
@@ -1077,13 +1089,51 @@ export default function ProjectPage() {
                                 typeof event.payload?.key === "string" &&
                                 event.payload.key === task.key,
                             );
-                          const text =
-                            typeof question?.payload?.clarification === "string"
-                              ? question.payload.clarification
-                              : typeof question?.payload?.summary === "string"
-                                ? question.payload.summary
-                                : "The agent needs a clarification before it can continue.";
-                          return <p className="text-sm text-ink">Agent asked: {text}</p>;
+                          const failure = [...snapshot.events]
+                            .reverse()
+                            .find(
+                              (event) =>
+                                event.type === "task.failed" &&
+                                typeof event.payload?.key === "string" &&
+                                event.payload.key === task.key,
+                            );
+                          const overspend = [...snapshot.events]
+                            .reverse()
+                            .find(
+                              (event) =>
+                                event.type === "task.spend_overspend" &&
+                                typeof event.payload?.key === "string" &&
+                                event.payload.key === task.key,
+                            );
+                          if (clarification) {
+                            const text =
+                              typeof clarification.payload?.clarification === "string"
+                                ? clarification.payload.clarification
+                                : typeof clarification.payload?.summary === "string"
+                                  ? clarification.payload.summary
+                                  : "The agent needs a clarification before it can continue.";
+                            return <p className="text-sm text-ink">Agent asked: {text}</p>;
+                          }
+                          if (overspend && typeof overspend.payload?.summary === "string") {
+                            return (
+                              <p className="text-sm text-ink">
+                                Escalated for spend: {overspend.payload.summary}
+                              </p>
+                            );
+                          }
+                          if (failure && typeof failure.payload?.cause === "string") {
+                            return (
+                              <p className="text-sm text-ink">
+                                Escalated after failures: {failure.payload.cause}
+                              </p>
+                            );
+                          }
+                          return (
+                            <p className="text-sm text-ink">
+                              Escalated after too many failed attempts. Resume to try again, or add
+                              guidance below.
+                            </p>
+                          );
                         })()}
                         <label className="block text-sm">
                           Your answer (optional — appended to the task)

@@ -213,6 +213,14 @@ def get_executor(request: Request):
         session.close()
 
 
+@router.post("/projects/{project_id}/github-sync", response_model=ProjectSnapshot)
+def sync_github(
+    project_id: str,
+    service: ExecutionService = Depends(get_executor),
+) -> ProjectSnapshot:
+    return service.sync_github(project_id)
+
+
 @router.post("/projects/{project_id}/tasks/run", response_model=ProjectSnapshot)
 def run_next_task(project_id: str, service: ExecutionService = Depends(get_executor)) -> ProjectSnapshot:
     return service.run_next(project_id)
