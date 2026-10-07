@@ -22,6 +22,11 @@ def implement_prompt(
         + zone.replace("_", " ")
         + " engineer. Implement only this task. "
         "Write files inside your zone and stop. "
+        "When you return writes, set done true in the same reply — do not stream "
+        "partial edits across turns. "
+        "Every write path must match your zone ownership globs (for example "
+        "frontend/**/* means paths like frontend/Foo.js — never src/ or web/ "
+        "unless those globs are listed). "
         "Use the linked requirements and acceptance criteria as the source of truth. "
         "Only set needs_clarification true when those criteria truly cannot answer the "
         "question; do not ask for details already listed below. "

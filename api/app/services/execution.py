@@ -861,7 +861,18 @@ class ExecutionService:
             for item in parsed.writes:
                 require_inside_zone(item.path, task.zone, rules)
             if not parsed.done:
-                continue
+                # Models often return writes with done=false and burn the iteration
+                # budget without ever committing. Treat in-zone writes as finished.
+                if parsed.writes:
+                    parsed = parsed.model_copy(
+                        update={
+                            "done": True,
+                            "summary": parsed.summary.strip()
+                            or "Implemented from returned writes.",
+                        }
+                    )
+                else:
+                    continue
             if not parsed.writes:
                 raise DomainError("The agent finished without writing a file.", status_code=422)
             summary = parsed.summary.strip()
