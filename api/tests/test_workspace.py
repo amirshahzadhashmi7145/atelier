@@ -40,6 +40,17 @@ def test_agent_commits_carry_role_and_run_trailers(tmp_path: Path):
     assert "Atelier-Run: run_abc123" in body
 
 
+def test_empty_task_branch_resets_onto_new_main(tmp_path: Path):
+    workspace = Workspace(tmp_path)
+    workspace.ensure()
+    workspace.start_branch("task/TASK-001")
+    workspace._git("checkout", "main")
+    workspace.commit("ARCH", "seed", [("package.json", '{"name":"demo"}\n')])
+    workspace.start_branch("task/TASK-001")
+    assert (tmp_path / "package.json").is_file()
+    assert workspace._git("rev-parse", "task/TASK-001") == workspace._git("rev-parse", "main")
+
+
 def test_rebase_onto_main_replays_the_branch(tmp_path: Path):
     workspace = Workspace(tmp_path)
     workspace.ensure()

@@ -835,6 +835,7 @@ class ExecutionService:
                 ownership=ownership,
                 requirements=requirements_text,
                 rework=rework,
+                workspace_tree=self._workspace_tree(workspace.root),
             )
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
             run_id = self._record_run(
@@ -1475,6 +1476,23 @@ class ExecutionService:
             if task.id == task_id:
                 return task
         raise DomainError("Task not found.", status_code=404)
+
+    def _workspace_tree(self, root: Path, *, limit: int = 80) -> str:
+        """List tracked-ish source files so the agent sees what already exists."""
+
+        skip = {".git", ".deps", "node_modules", "__pycache__", ".venv", "venv"}
+        lines: list[str] = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            if any(part in skip for part in path.parts):
+                continue
+            relative = path.relative_to(root).as_posix()
+            lines.append(relative)
+            if len(lines) >= limit:
+                lines.append("…")
+                break
+        return "\n".join(lines)
 
     def _root(self, project: Project) -> Path:
         return Path(self.settings.workspaces_dir) / project.id

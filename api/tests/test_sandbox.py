@@ -191,7 +191,7 @@ def test_run_checks_installs_pytest_into_workspace_deps(tmp_path: Path):
     assert calls[1][1].get("env", {}).get("PYTHONPATH") == "/workspace/.deps"
 
 
-def test_run_checks_fails_clearly_when_npm_strategy_has_no_package_json(tmp_path: Path):
+def test_run_checks_fails_only_npm_tiers_when_package_json_missing(tmp_path: Path):
     calls: list[list[str]] = []
 
     def fake_sandbox(root, argv, **kwargs):
@@ -210,9 +210,13 @@ def test_run_checks_fails_clearly_when_npm_strategy_has_no_package_json(tmp_path
             sandbox=SandboxOptions(image="python:3.12-slim", node_image="node:20-slim"),
         )
 
-    assert calls == []
-    assert all(item.exit_code == 1 for item in results)
-    assert "package.json" in results[0].excerpt
+    by_tier = {item.tier: item for item in results}
+    assert by_tier["unit"].exit_code == 0
+    assert by_tier["integration"].exit_code == 0
+    assert by_tier["ui"].exit_code == 1
+    assert "package.json" in by_tier["ui"].excerpt
+    # Python tiers still run (and may pip-install); npm install is skipped.
+    assert any(argv and argv[0] == "python3" for argv in calls)
 
 
 def test_sandbox_install_mode_allows_network_and_writable_mount(tmp_path: Path):

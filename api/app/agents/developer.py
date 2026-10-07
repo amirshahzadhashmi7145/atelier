@@ -16,6 +16,7 @@ def implement_prompt(
     ownership: str,
     requirements: str = "",
     rework: str = "",
+    workspace_tree: str = "",
 ) -> tuple[str, str]:
     system = (
         "You are the "
@@ -37,6 +38,10 @@ def implement_prompt(
         "Declared tests run on your writes before commit. Add or update verify scripts that "
         "assert the linked acceptance criteria (HTTP status/body, module behaviour, or that "
         "the served page loads its real script and talks to the API). "
+        "QA reads the pytest/npm excerpts: assertions must mention the status code and "
+        "response fields from the criteria so the review can mark them pass. "
+        "Keep existing passing harness or feature tests; extend them for this task's "
+        "criteria instead of deleting them. "
         "On the first implementation that introduces tests, also write the manifests the "
         "architecture's commands need: requirements.txt (include pytest when using "
         "python -m pytest) and/or package.json with a working test script when using npm. "
@@ -59,6 +64,8 @@ def implement_prompt(
     if requirements.strip():
         user += "\nLinked requirements and acceptance criteria:\n" + requirements.strip() + "\n"
     user += f"\nOwnership:\n{ownership}"
+    if workspace_tree.strip():
+        user += "\n\nCurrent branch files (read-only context):\n" + workspace_tree.strip()
     if rework.strip():
         user += "\n\nPrevious review failed:\n" + rework.strip()
     return system, user

@@ -27,12 +27,27 @@ class Workspace:
         self._git("commit", "-m", "Start the integration branch.")
 
     def start_branch(self, branch: str) -> None:
+        """Check out the task branch on top of the current main tip.
+
+        Empty branches (no commits of their own) are reset to main so a
+        scaffold or dependency commit on main is visible after a failed run.
+        Branches that already carry commits are rebased onto main.
+        """
+
         self._git("checkout", "main")
+        if branch in {"main", "master"}:
+            return
         listed = self._git("branch", "--list", branch).strip()
-        if listed:
-            self._git("checkout", branch)
-        else:
+        if not listed:
             self._git("checkout", "-b", branch)
+            return
+        ahead = self._git("rev-list", "--count", f"main..{branch}").strip()
+        if ahead == "0":
+            self._git("branch", "-f", branch, "main")
+            self._git("checkout", branch)
+            return
+        self._git("checkout", branch)
+        self.rebase_onto_main(branch)
 
     def apply(self, writes: list[tuple[str, str]]) -> None:
         """Write files and stage them. Does not create a commit."""
