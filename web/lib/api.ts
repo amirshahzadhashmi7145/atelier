@@ -31,6 +31,7 @@ export function postProject(body: {
   description: string;
   tech_preferences?: string;
   github_repo?: string;
+  create_github_repo?: boolean;
 }) {
   return api<Snapshot>("/api/projects", { method: "POST", body: JSON.stringify(body) });
 }

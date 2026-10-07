@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, loadProject, loadTaskDetail } from "@/lib/api";
 import type { Requirement, Snapshot, TaskDetail } from "@/lib/types";
 
@@ -35,6 +35,16 @@ const GATE_LABELS: { key: string; label: string; irreversible?: boolean }[] = [
   { key: "spend_increase", label: "Spend increase" },
 ];
 
+const POLL_MS = 1500;
+
+function syncLabel(syncedAt: number | null) {
+  if (!syncedAt) return "connecting…";
+  const ms = Date.now() - syncedAt;
+  if (ms < 2000) return "live";
+  if (ms < 60000) return `updated ${Math.floor(ms / 1000)}s ago`;
+  return `updated ${Math.floor(ms / 60000)}m ago`;
+}
+
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -52,30 +62,64 @@ export default function ProjectPage() {
   const [amendPath, setAmendPath] = useState("");
   const [amendContent, setAmendContent] = useState("");
   const [amendSummary, setAmendSummary] = useState("");
+  const [resumeAnswers, setResumeAnswers] = useState<Record<string, string>>({});
+  const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
+  const openTaskIdRef = useRef<string | null>(null);
+  openTaskIdRef.current = openTaskId;
 
   async function refresh() {
     const next = await loadProject(params.id);
     setSnapshot(next);
+    setSyncedAt(Date.now());
     return next;
   }
 
+  // FR-UI-6: keep status live even while a long Run is in flight.
   useEffect(() => {
-    refresh().catch((err: Error) => setError(err.message));
-    // The id is the only input. refresh closes over it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id]);
+    let cancelled = false;
+    let inFlight = false;
 
-  // FR-UI-6: surface state changes within a few seconds without a full reload.
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (busy || detailBusy || document.hidden) return;
-      refresh().catch(() => {
+    const tick = async () => {
+      if (cancelled || document.hidden || inFlight) return;
+      inFlight = true;
+      try {
+        const next = await loadProject(params.id);
+        if (cancelled) return;
+        setSnapshot(next);
+        setSyncedAt(Date.now());
+        const openId = openTaskIdRef.current;
+        if (openId) {
+          try {
+            const detail = await loadTaskDetail(params.id, openId);
+            if (!cancelled && openTaskIdRef.current === openId) {
+              setTaskDetail(detail);
+            }
+          } catch {
+            // Keep the last task drill-down; the next tick retries.
+          }
+        }
+      } catch {
         // Keep the last good snapshot; the next tick retries.
-      });
-    }, 4000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id, busy, detailBusy]);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    tick();
+    const poll = window.setInterval(tick, POLL_MS);
+    const clockTimer = window.setInterval(() => setClock(Date.now()), 1000);
+    const onVisible = () => {
+      if (!document.hidden) void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      window.clearInterval(clockTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [params.id]);
 
   async function inspectTask(taskId: string) {
     if (openTaskId === taskId) {
@@ -129,11 +173,13 @@ export default function ProjectPage() {
     try {
       const next = await action();
       setSnapshot(next);
+      setSyncedAt(Date.now());
       return next;
     } catch (err) {
       setError(err instanceof Error ? err.message : "That step failed.");
       try {
         setSnapshot(await loadProject(params.id));
+        setSyncedAt(Date.now());
       } catch {
         // The error above is the one to show.
       }
@@ -167,12 +213,21 @@ export default function ProjectPage() {
     agents: [],
     needs_you: [],
   };
+  // Touch clock so the sync label re-renders every second.
+  void clock;
+  const liveLabel = syncLabel(syncedAt);
 
   return (
     <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[14rem_1fr]">
       <aside>
         <Link href="/" className="text-xs tracking-[0.22em] text-oxide uppercase">
           Atelier
+        </Link>
+        <Link
+          href={`/office?project=${project.id}`}
+          className="mt-3 block text-sm text-muted underline-offset-4 hover:text-ink hover:underline"
+        >
+          Coders Alley
         </Link>
         <ol className="mt-8 space-y-5">
           {RAIL.map((step, index) => (
@@ -193,8 +248,39 @@ export default function ProjectPage() {
             <p className="mt-2 text-sm text-muted">Preferences: {project.tech_preferences}</p>
           ) : null}
           {project.github_repo ? (
-            <p className="mt-2 text-sm text-muted">GitHub: {project.github_repo}</p>
-          ) : null}
+            <p className="mt-2 text-sm text-muted">
+              GitHub:{" "}
+              <a
+                className="underline"
+                href={`https://github.com/${project.github_repo}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {project.github_repo}
+              </a>
+            </p>
+          ) : (
+            <div className="mt-3">
+              <button
+                type="button"
+                disabled={busy}
+                className="border border-ink px-3 py-2 text-sm"
+                onClick={() =>
+                  run(() =>
+                    api(`/api/projects/${project.id}/github-repo`, {
+                      method: "POST",
+                      body: JSON.stringify({ create: true, private: false }),
+                    }),
+                  )
+                }
+              >
+                Create GitHub repository
+              </button>
+              <p className="mt-1 text-sm text-muted">
+                No remote yet — creates a public repo from the project name using GITHUB_TOKEN.
+              </p>
+            </div>
+          )}
           <p className="mt-2 text-sm text-muted">
             Spend: {spendTokens.toLocaleString()} / {spendCeiling.toLocaleString()} tokens
             {estimateTokens
@@ -329,13 +415,17 @@ export default function ProjectPage() {
         {error ? <p className="text-sm text-oxide">{error}</p> : null}
 
         <section className="border border-line bg-white/70 p-5">
-          <h2 className="font-serif text-2xl">Status</h2>
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="font-serif text-2xl">Status</h2>
+            <p className="text-xs tracking-[0.18em] text-muted uppercase">{liveLabel}</p>
+          </div>
           <p className="mt-1 text-sm text-muted">
-            Task counts, who is waiting on whom, open gates, and which agents are busy.
+            Task counts, who is waiting on whom, open gates, and which agents are busy. Refreshes every
+            1.5s while this page is open — including during a long Run.
           </p>
           {status.needs_you.length ? (
             <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
-              Needs you: {status.needs_you.join(" · ")}
+              Waiting on you: {status.needs_you.join(" · ")}. Resume below, or run other ready tasks.
             </p>
           ) : null}
           {Object.keys(status.task_counts).length ? (
@@ -760,7 +850,8 @@ export default function ProjectPage() {
             </p>
             {status.needs_you.length > 0 ? (
               <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
-                Needs you first: {status.needs_you.join(" · ")}
+                Waiting on you: {status.needs_you.join(" · ")}. Answer + resume that task below, or
+                keep running other ready work.
               </p>
             ) : null}
             {can("run_ready") ? (
@@ -976,16 +1067,60 @@ export default function ProjectPage() {
                       </label>
                     ) : null}
                     {task.state === "escalated" ? (
-                      <button
-                        type="button"
-                        disabled={busy || project.paused}
-                        className="mt-2 bg-oxide px-3 py-2 text-sm text-white"
-                        onClick={() =>
-                          run(() => api(`/api/projects/${project.id}/tasks/${task.id}/resume`, { method: "POST" }))
-                        }
-                      >
-                        Resume escalated task
-                      </button>
+                      <div className="mt-2 space-y-2 border border-oxide-soft bg-oxide-soft/40 p-3">
+                        {(() => {
+                          const question = [...snapshot.events]
+                            .reverse()
+                            .find(
+                              (event) =>
+                                event.type === "task.needs_clarification" &&
+                                typeof event.payload?.key === "string" &&
+                                event.payload.key === task.key,
+                            );
+                          const text =
+                            typeof question?.payload?.clarification === "string"
+                              ? question.payload.clarification
+                              : typeof question?.payload?.summary === "string"
+                                ? question.payload.summary
+                                : "The agent needs a clarification before it can continue.";
+                          return <p className="text-sm text-ink">Agent asked: {text}</p>;
+                        })()}
+                        <label className="block text-sm">
+                          Your answer (optional — appended to the task)
+                          <textarea
+                            value={resumeAnswers[task.id] ?? ""}
+                            onChange={(event) =>
+                              setResumeAnswers((prev) => ({ ...prev, [task.id]: event.target.value }))
+                            }
+                            rows={2}
+                            className="mt-1 w-full border border-line bg-paper px-3 py-2"
+                            placeholder="e.g. Win = three in a row; response 'Congratulation {name} you won', status 200"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={busy || project.paused}
+                          className="bg-oxide px-3 py-2 text-sm text-white"
+                          onClick={() =>
+                            run(() =>
+                              api(`/api/projects/${project.id}/tasks/${task.id}/resume`, {
+                                method: "POST",
+                                body: JSON.stringify({
+                                  answer: (resumeAnswers[task.id] ?? "").trim() || null,
+                                }),
+                              }),
+                            ).then(() =>
+                              setResumeAnswers((prev) => {
+                                const next = { ...prev };
+                                delete next[task.id];
+                                return next;
+                              }),
+                            )
+                          }
+                        >
+                          Resume escalated task
+                        </button>
+                      </div>
                     ) : null}
                     {canCancel(task.state) ? (
                       <button

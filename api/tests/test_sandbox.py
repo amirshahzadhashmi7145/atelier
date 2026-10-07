@@ -5,7 +5,26 @@ from unittest.mock import patch
 import pytest
 
 from app.services.checks import SandboxOptions, run_checks
-from app.services.sandbox import run_in_sandbox
+from app.services.sandbox import image_for_program, run_in_sandbox
+
+
+def test_image_for_program_picks_node_for_npm():
+    assert (
+        image_for_program(
+            "npm",
+            default_image="python:3.12-slim",
+            node_image="node:20-slim",
+        )
+        == "node:20-slim"
+    )
+    assert (
+        image_for_program(
+            "python3",
+            default_image="python:3.12-slim",
+            node_image="node:20-slim",
+        )
+        == "python:3.12-slim"
+    )
 
 
 def test_sandbox_argv_has_no_network_and_a_read_only_mount(tmp_path: Path):
@@ -79,6 +98,29 @@ def test_run_checks_uses_the_sandbox_when_configured(tmp_path: Path):
     assert all(item.exit_code == 0 for item in results)
     assert all(item.excerpt == "sandboxed" for item in results)
     assert calls[0][1][:1] == ["python3"]
+
+
+def test_run_checks_uses_the_node_image_for_npm(tmp_path: Path):
+    images: list[str] = []
+
+    def fake_sandbox(root, argv, **kwargs):
+        images.append(kwargs["image"])
+        return 0, "ok"
+
+    with patch("app.services.checks.run_in_sandbox", side_effect=fake_sandbox):
+        results = run_checks(
+            tmp_path,
+            {
+                "unit": "npm run test:unit",
+                "integration": "npm run test:integration",
+                "ui": "npm run test:ui",
+            },
+            timeout=5,
+            sandbox=SandboxOptions(image="python:3.12-slim", node_image="node:20-slim"),
+        )
+
+    assert all(item.exit_code == 0 for item in results)
+    assert images == ["node:20-slim", "node:20-slim", "node:20-slim"]
 
 
 @pytest.mark.skipif(

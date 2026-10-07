@@ -11,6 +11,7 @@ from app.schemas import (
     ClarificationSubmit,
     GatePolicyUpdate,
     GateSubmit,
+    GithubRepoEnsure,
     InterpretationUpdate,
     ProjectCreate,
     ProjectListItem,
@@ -20,6 +21,7 @@ from app.schemas import (
     TaskAmend,
     TaskDetailOut,
     TaskReassign,
+    TaskResume,
     UntestableSubmit,
 )
 from app.services.planning import PlanningService
@@ -58,7 +60,22 @@ def create_project(
         description=body.description,
         tech_preferences=body.tech_preferences,
         github_repo=body.github_repo,
+        create_github_repo=body.create_github_repo,
         spend_ceiling_tokens=ceiling,
+    )
+
+
+@router.post("/projects/{project_id}/github-repo", response_model=ProjectSnapshot)
+def ensure_github_repo(
+    project_id: str,
+    body: GithubRepoEnsure,
+    service: PlanningService = Depends(get_service),
+) -> ProjectSnapshot:
+    return service.ensure_github_repo(
+        project_id,
+        github_repo=body.github_repo,
+        create=body.create,
+        private=body.private,
     )
 
 
@@ -248,9 +265,10 @@ def accept_task(
 def resume_task(
     project_id: str,
     task_id: str,
+    body: TaskResume | None = None,
     service: ExecutionService = Depends(get_executor),
 ) -> ProjectSnapshot:
-    return service.resume(project_id, task_id)
+    return service.resume(project_id, task_id, answer=(body.answer if body else None))
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/cancel", response_model=ProjectSnapshot)

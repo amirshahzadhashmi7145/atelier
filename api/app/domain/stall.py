@@ -17,6 +17,8 @@ _PROGRESSING = {
     "gated",
     "changes_requested",
 }
+# Escalated means a person is already in the loop — not a silent deadlock.
+_AWAITING_HUMAN = {"escalated"}
 _TERMINAL = {"done", "cancelled"}
 
 
@@ -69,7 +71,12 @@ def find_stalls(
             )
 
     unfinished = [task for task in tasks if task.state not in _TERMINAL]
-    if unfinished and not any(task.state in _PROGRESSING for task in unfinished):
+    awaiting_human = any(task.state in _AWAITING_HUMAN for task in unfinished)
+    if (
+        unfinished
+        and not awaiting_human
+        and not any(task.state in _PROGRESSING for task in unfinished)
+    ):
         for task in unfinished:
             if task.state in {"blocked", "failed"}:
                 found.append(

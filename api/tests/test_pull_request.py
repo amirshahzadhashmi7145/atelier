@@ -1,6 +1,11 @@
 from app.domain.dependencies import dependency_files, forbidden_dependency_sources
 from app.domain.pull_request import CheckLine, compose
-from app.services.github import open_pull_request
+from app.services.github import (
+    create_repository,
+    open_pull_request,
+    resolve_or_create_repository,
+    slugify_repo_name,
+)
 from unittest.mock import patch
 
 import httpx
@@ -110,3 +115,79 @@ def test_a_bad_repo_name_is_rejected():
         assert exc.status_code == 422
     else:
         raise AssertionError("expected a rejection")
+
+
+def test_slugify_repo_name_is_github_safe():
+    assert slugify_repo_name("Dynamic Tic Tac Toe!") == "dynamic-tic-tac-toe"
+    assert slugify_repo_name("@@@") == "atelier-project"
+
+
+def test_create_repository_posts_under_the_user():
+    calls: list[tuple[str, str]] = []
+
+    def fake_get(url, **kwargs):
+        calls.append(("GET", url))
+        if url.endswith("/user"):
+            return httpx.Response(
+                200,
+                json={"login": "amir"},
+                request=httpx.Request("GET", url),
+            )
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    def fake_post(url, **kwargs):
+        calls.append(("POST", url))
+        assert kwargs["json"]["name"] == "dynamic-tic-tac-toe"
+        assert kwargs["json"]["auto_init"] is False
+        return httpx.Response(
+            201,
+            json={
+                "full_name": "amir/dynamic-tic-tac-toe",
+                "html_url": "https://github.com/amir/dynamic-tic-tac-toe",
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    with (
+        patch("app.services.github.httpx.get", side_effect=fake_get),
+        patch("app.services.github.httpx.post", side_effect=fake_post),
+    ):
+        remote = create_repository(
+            api_url="https://api.github.com",
+            token="gho_test",
+            name="Dynamic Tic Tac Toe",
+            description="make a game",
+        )
+    assert remote.full_name == "amir/dynamic-tic-tac-toe"
+    assert remote.created is True
+    assert any(method == "POST" and url.endswith("/user/repos") for method, url in calls)
+
+
+def test_resolve_or_create_mints_from_project_name_when_blank():
+    with (
+        patch(
+            "app.services.github.authenticated_login",
+            return_value="amir",
+        ),
+        patch(
+            "app.services.github._get_repo",
+            return_value=None,
+        ),
+        patch(
+            "app.services.github.httpx.post",
+            return_value=httpx.Response(
+                201,
+                json={
+                    "full_name": "amir/notes-app",
+                    "html_url": "https://github.com/amir/notes-app",
+                },
+                request=httpx.Request("POST", "https://api.github.com/user/repos"),
+            ),
+        ),
+    ):
+        remote = resolve_or_create_repository(
+            api_url="https://api.github.com",
+            token="gho_test",
+            project_name="Notes App",
+        )
+    assert remote.full_name == "amir/notes-app"
