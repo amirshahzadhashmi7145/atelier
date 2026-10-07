@@ -51,3 +51,17 @@ def test_a_ready_task_means_the_graph_is_not_deadlocked():
         budget_seconds=60,
     )
     assert stalls == []
+
+
+def test_an_escalated_task_is_not_treated_as_a_deadlock():
+    """A person is already needed — do not cascade-escalate the blocked graph."""
+
+    stalls = find_stalls(
+        [
+            StallTask("t1", "TASK-001", "escalated"),
+            StallTask("t2", "TASK-002", "blocked"),
+        ],
+        claimed_at={},
+        budget_seconds=60,
+    )
+    assert stalls == []

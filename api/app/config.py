@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     check_timeout_seconds: int = 20
     check_sandbox: bool = True
     sandbox_image: str = "python:3.12-slim"
+    sandbox_node_image: str = "node:20-slim"
     sandbox_memory: str = "256m"
     sandbox_cpus: str = "1"
     sandbox_pids_limit: int = 64

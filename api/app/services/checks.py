@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.errors import DomainError
-from app.services.sandbox import run_in_sandbox
+from app.services.sandbox import image_for_program, run_in_sandbox
 
 TIERS = ("unit", "integration", "ui")
 _OPERATORS = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<"}
@@ -32,6 +32,7 @@ class CheckResult:
 @dataclass(frozen=True)
 class SandboxOptions:
     image: str
+    node_image: str = "node:20-slim"
     memory: str = "256m"
     cpus: str = "1"
     pids_limit: int = 64
@@ -86,10 +87,16 @@ def _run(
 ) -> CheckResult:
     argv = parse_command(command)
     if sandbox is not None:
+        image = image_for_program(
+            argv[0],
+            default_image=sandbox.image,
+            node_image=sandbox.node_image,
+            python_image=sandbox.image,
+        )
         exit_code, excerpt = run_in_sandbox(
             root,
             argv,
-            image=sandbox.image,
+            image=image,
             timeout=timeout,
             memory=sandbox.memory,
             cpus=sandbox.cpus,

@@ -8,6 +8,26 @@ The container is removed when the command finishes.
 import subprocess
 from pathlib import Path
 
+_NODE_PROGRAMS = frozenset({"node", "nodejs", "npm", "npx", "yarn", "pnpm", "bun"})
+_PYTHON_PROGRAMS = frozenset({"python", "python3", "pytest", "pip", "pip3"})
+
+
+def image_for_program(
+    program: str,
+    *,
+    default_image: str,
+    node_image: str,
+    python_image: str | None = None,
+) -> str:
+    """Pick a container image that actually contains the program."""
+
+    name = Path(program).name.lower()
+    if name in _NODE_PROGRAMS:
+        return node_image
+    if name in _PYTHON_PROGRAMS:
+        return python_image or default_image
+    return default_image
+
 
 def run_in_sandbox(
     root: Path,

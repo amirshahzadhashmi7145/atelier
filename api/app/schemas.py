@@ -15,7 +15,14 @@ class ProjectCreate(BaseModel):
     description: str = Field(min_length=1)
     tech_preferences: str | None = None
     github_repo: str | None = None
+    create_github_repo: bool = False
     spend_ceiling_tokens: int | None = Field(default=None, ge=1)
+
+
+class GithubRepoEnsure(BaseModel):
+    github_repo: str | None = None
+    create: bool = True
+    private: bool = False
 
 
 class SpendCeilingUpdate(BaseModel):
@@ -66,6 +73,10 @@ class TaskAmend(BaseModel):
     path: str = Field(min_length=1, max_length=400)
     content: str
     summary: str = Field(default="Person amended the branch.", min_length=1, max_length=200)
+
+
+class TaskResume(BaseModel):
+    answer: str | None = Field(default=None, max_length=2000)
 
 
 class CriterionOut(BaseModel):

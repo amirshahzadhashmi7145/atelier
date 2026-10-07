@@ -15,9 +15,15 @@ from app.errors import DomainError
 def glob_matches(pattern: str, relative_path: str) -> bool:
     pattern = pattern.replace("\\", "/").lstrip("./")
     path = relative_path.replace("\\", "/").lstrip("./")
-    if pattern.endswith("/**"):
-        root = pattern[: -3].rstrip("/")
-        return path == root or path.startswith(root + "/")
+    # Treat directory ownership forms the same: backend/** and backend/**/*
+    # both mean "the folder and every file under it". fnmatch alone does not,
+    # because * does not cross '/' and /**/* requires a nested segment.
+    for suffix in ("/**/*", "/**"):
+        if pattern.endswith(suffix):
+            root = pattern[: -len(suffix)].rstrip("/")
+            if not root:
+                return True
+            return path == root or path.startswith(root + "/")
     return fnmatch.fnmatch(path, pattern)
 
 

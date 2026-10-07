@@ -14,6 +14,16 @@ def test_the_more_specific_directory_wins():
     assert zone_for("web/page.tsx", RULES) == "frontend"
 
 
+def test_star_star_slash_star_covers_files_in_the_zone_root():
+    """Models often emit backend/**/*; that must still own backend/foo.py."""
+
+    rules = [("backend/**/*", "backend"), ("frontend/**/*", "frontend")]
+    assert zone_for("backend/winning_condition.py", rules) == "backend"
+    assert zone_for("backend/api/routes.py", rules) == "backend"
+    assert zone_for("frontend/App.tsx", rules) == "frontend"
+    require_inside_zone("backend/winning_condition.py", "backend", rules)
+
+
 def test_a_write_outside_the_role_is_rejected():
     with pytest.raises(DomainError):
         require_inside_zone("web/page.tsx", "backend", RULES)

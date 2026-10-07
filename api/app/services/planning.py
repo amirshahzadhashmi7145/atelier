@@ -194,13 +194,35 @@ class PlanningService:
         description: str,
         tech_preferences: str | None,
         github_repo: str | None = None,
+        create_github_repo: bool = False,
         spend_ceiling_tokens: int = 1_000_000,
     ) -> ProjectSnapshot:
         repo = (github_repo or "").strip() or None
-        if repo and (repo.count("/") != 1 or any(part.strip() == "" for part in repo.split("/"))):
+        if repo and repo.count("/") > 1:
+            raise DomainError("github_repo must look like owner/name or a bare repo name.", status_code=422)
+        if repo and "/" in repo and any(part.strip() == "" for part in repo.split("/")):
             raise DomainError("github_repo must look like owner/name.", status_code=422)
         if spend_ceiling_tokens < 1:
             raise DomainError("The spend ceiling must be at least 1 token.", status_code=422)
+        remote_meta: dict | None = None
+        if create_github_repo:
+            remote = self._create_github_repository(
+                project_name=name.strip(),
+                project_description=description.strip(),
+                github_repo=repo,
+            )
+            repo = remote.full_name
+            remote_meta = {
+                "github_repo": remote.full_name,
+                "html_url": remote.html_url,
+                "created": remote.created,
+            }
+        elif repo and repo.count("/") != 1:
+            # Bare name without create flag still needs owner/name.
+            raise DomainError(
+                "github_repo must look like owner/name, or tick Create GitHub repository.",
+                status_code=422,
+            )
         project = Project(
             id=new_id("prj"),
             name=name.strip(),
@@ -214,7 +236,106 @@ class PlanningService:
         self.session.add(project)
         self.session.flush()
         self._event(project, "project.created", actor_kind="user", payload={"name": project.name})
+        if remote_meta:
+            self._event(
+                project,
+                "project.github_repo",
+                actor_kind="system",
+                payload={
+                    **remote_meta,
+                    "summary": (
+                        f"Created GitHub repository {remote_meta['github_repo']}."
+                        if remote_meta["created"]
+                        else f"Linked existing GitHub repository {remote_meta['github_repo']}."
+                    ),
+                },
+            )
         return self.snapshot(project.id)
+
+    def ensure_github_repo(
+        self,
+        project_id: str,
+        *,
+        github_repo: str | None = None,
+        create: bool = True,
+        private: bool = False,
+    ) -> ProjectSnapshot:
+        """Create or link a GitHub repository for an existing project."""
+
+        project = self._project(project_id)
+        if project.github_repo and not create and not (github_repo or "").strip():
+            return self.snapshot(project_id)
+        if not create and not (github_repo or "").strip() and not project.github_repo:
+            raise DomainError(
+                "Pass github_repo or set create true to mint a repository.",
+                status_code=422,
+            )
+        hint = (github_repo or "").strip() or project.github_repo
+        if not create and hint:
+            if hint.count("/") != 1:
+                raise DomainError("github_repo must look like owner/name.", status_code=422)
+            project.github_repo = hint
+            project.updated_at = utcnow()
+            self._event(
+                project,
+                "project.github_repo",
+                actor_kind="user",
+                payload={
+                    "github_repo": hint,
+                    "created": False,
+                    "summary": f"Linked GitHub repository {hint}.",
+                },
+            )
+            return self.snapshot(project_id)
+        remote = self._create_github_repository(
+            project_name=project.name,
+            project_description=project.description,
+            github_repo=hint,
+            private=private,
+        )
+        project.github_repo = remote.full_name
+        project.updated_at = utcnow()
+        self._event(
+            project,
+            "project.github_repo",
+            actor_kind="system",
+            payload={
+                "github_repo": remote.full_name,
+                "html_url": remote.html_url,
+                "created": remote.created,
+                "summary": (
+                    f"Created GitHub repository {remote.full_name}."
+                    if remote.created
+                    else f"Linked existing GitHub repository {remote.full_name}."
+                ),
+            },
+        )
+        return self.snapshot(project_id)
+
+    def _create_github_repository(
+        self,
+        *,
+        project_name: str,
+        project_description: str,
+        github_repo: str | None,
+        private: bool = False,
+    ):
+        from app.services import github as github_api
+
+        token = self.settings.github_token.strip()
+        if not token:
+            raise DomainError(
+                "GITHUB_TOKEN is required to create or link a GitHub repository.",
+                status_code=422,
+            )
+        return github_api.resolve_or_create_repository(
+            api_url=self.settings.github_api_url,
+            token=token,
+            project_name=project_name,
+            project_description=project_description,
+            github_repo=github_repo,
+            private=private,
+        )
 
     def pause(self, project_id: str) -> ProjectSnapshot:
         project = self._project(project_id)
@@ -850,12 +971,19 @@ class PlanningService:
         edges: list[tuple[str, str]] = []
         prepared: list[tuple[_TaskIn, str, list[str], list[str]]] = []
         for index, item in enumerate(parsed.tasks):
-            if any(dep == index for dep in item.depends_on):
-                raise DomainError(f"{keys[index]} cannot depend on itself.", status_code=422)
-            if any(dep < 0 or dep >= len(parsed.tasks) for dep in item.depends_on):
-                raise DomainError(f"{keys[index]} depends on a task that is not in the graph.", status_code=422)
+            # Drop self-deps and out-of-range indexes the model sometimes emits.
+            dep_indexes = [
+                dep
+                for dep in dict.fromkeys(item.depends_on)
+                if dep != index and 0 <= dep < len(parsed.tasks)
+            ]
+            # Models sometimes omit requirement_indexes; keep FR-PLAN-22 by
+            # linking each orphan task to a requirement in list order.
+            req_indexes = list(dict.fromkeys(item.requirement_indexes))
+            if not req_indexes:
+                req_indexes = [index % len(requirements)]
             requirement_keys = []
-            for req_index in item.requirement_indexes:
+            for req_index in req_indexes:
                 if req_index < 0 or req_index >= len(requirements):
                     raise DomainError(
                         f"{keys[index]} points at a requirement that does not exist.",
@@ -869,7 +997,7 @@ class PlanningService:
                 known_requirements=known_requirements,
                 known_zones=known_zones,
             )
-            depends = [keys[dep] for dep in dict.fromkeys(item.depends_on)]
+            depends = [keys[dep] for dep in dep_indexes]
             for dep_key in depends:
                 edges.append((keys[index], dep_key))
             prepared.append((item, keys[index], requirement_keys, depends))
@@ -1256,9 +1384,14 @@ class PlanningService:
         for item in project.assumptions:
             lines += ["", f"Assumption: {item.statement}"]
         if project.requirements:
-            lines += ["", "Requirements:"]
-            for requirement in sorted(project.requirements, key=lambda row: row.sort_order):
-                lines.append(f"{requirement.key} [{requirement.kind}] {requirement.title}: {requirement.statement}")
+            lines += ["", "Requirements (use these zero-based indexes in requirement_indexes):"]
+            for index, requirement in enumerate(
+                sorted(project.requirements, key=lambda row: row.sort_order)
+            ):
+                lines.append(
+                    f"[{index}] {requirement.key} [{requirement.kind}] "
+                    f"{requirement.title}: {requirement.statement}"
+                )
                 for criterion in requirement.criteria:
                     lines.append(f"  {criterion.key}: {criterion.statement}")
         if project.architecture_summary:

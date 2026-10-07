@@ -8,7 +8,7 @@ writes are discarded so the branch stays clean.
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
@@ -87,6 +87,11 @@ class _FindingIn(BaseModel):
     observed: str = ""
     expected: str = ""
 
+    @field_validator("note", "reproduction", "observed", "expected", mode="before")
+    @classmethod
+    def _blank_none(cls, value: object) -> str:
+        return "" if value is None else str(value)
+
 
 class _ReviewIn(BaseModel):
     findings: list[_FindingIn] = Field(min_length=1)
@@ -116,6 +121,15 @@ class ExecutionService:
             self._execute(project, task)
         except DomainError as exc:
             self._fail(project, task, exc.message)
+            return self.planning.snapshot(project.id)
+        # With automatic merge, finish QA in the same click so smoke-test
+        # "untestable" findings do not strand every task on a human button.
+        self.session.flush()
+        self.session.refresh(task)
+        if task.state == TaskState.IN_REVIEW.value and is_automatic(
+            project.gate_policy, "merge"
+        ):
+            return self.review(project_id, task.id)
         return self.planning.snapshot(project.id)
 
     def review(self, project_id: str, task_id: str) -> ProjectSnapshot:
@@ -286,6 +300,11 @@ class ExecutionService:
                     "summary": "Could not test " + ", ".join(flagged) + ".",
                 },
             )
+            # Merge already automatic ⇒ the person opted out of this pause;
+            # do not strand every task on smoke-test "untestable" findings.
+            if is_automatic(project.gate_policy, "merge"):
+                self.session.flush()
+                return self._auto_waive_untestable(project_id, task_id)
         return self.planning.snapshot(project.id)
 
     def accept(self, project_id: str, task_id: str, *, actor_kind: str = "user") -> ProjectSnapshot:
@@ -380,7 +399,13 @@ class ExecutionService:
         self._unblock(project)
         return self.planning.snapshot(project.id)
 
-    def resume(self, project_id: str, task_id: str) -> ProjectSnapshot:
+    def resume(
+        self,
+        project_id: str,
+        task_id: str,
+        *,
+        answer: str | None = None,
+    ) -> ProjectSnapshot:
         """A person returns an escalated task to the ready queue."""
 
         project = self.planning._project(project_id)
@@ -388,6 +413,18 @@ class ExecutionService:
         task = self._task(project, task_id)
         if task.state != TaskState.ESCALATED.value:
             raise DomainError("Only an escalated task can be resumed.")
+        note = (answer or "").strip()
+        if note:
+            clarification = ""
+            for event in sorted(project.events, key=lambda item: item.occurred_at, reverse=True):
+                if event.task_id == task.id and event.type == "task.needs_clarification":
+                    clarification = str(event.payload.get("clarification") or event.payload.get("summary") or "")
+                    break
+            appendix = "\n\nHuman clarification"
+            if clarification:
+                appendix += f"\nQ: {clarification}"
+            appendix += f"\nA: {note}"
+            task.description = (task.description or "").rstrip() + appendix
         task.state, task.retry_count = self._move(task, TaskState.READY)
         task.retry_count = 0
         self.planning._event(
@@ -397,9 +434,61 @@ class ExecutionService:
             task_id=task.id,
             payload={
                 "key": task.key,
-                "summary": "A person returned the escalated task to ready.",
+                "summary": (
+                    "A person answered the clarification and returned the task to ready."
+                    if note
+                    else "A person returned the escalated task to ready."
+                ),
+                "answer": note or None,
             },
         )
+        return self.planning.snapshot(project.id)
+
+    def _auto_waive_untestable(self, project_id: str, task_id: str) -> ProjectSnapshot:
+        flagged = list(
+            self.session.scalars(
+                select(CriterionFinding).where(
+                    CriterionFinding.task_id == task_id,
+                    CriterionFinding.result == "untestable",
+                )
+            ).all()
+        )
+        return self._finish_waive(
+            project_id,
+            task_id,
+            flagged,
+            actor_kind="system",
+        )
+
+    def _finish_waive(
+        self,
+        project_id: str,
+        task_id: str,
+        flagged: list,
+        *,
+        actor_kind: str,
+    ) -> ProjectSnapshot:
+        project = self.planning._project(project_id)
+        task = self._task(project, task_id)
+        for item in flagged:
+            item.result = "waived"
+        self.session.flush()
+        self.session.expire(project, ["findings"])
+        task.state, task.retry_count = self._move(task, TaskState.GATED)
+        self.planning._event(
+            project,
+            "qa.waived",
+            actor_kind=actor_kind,
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "summary": "Accepted without testing "
+                + ", ".join(item.criterion_key for item in flagged)
+                + ".",
+            },
+        )
+        if is_automatic(project.gate_policy, "merge"):
+            return self.accept(project_id, task_id, actor_kind="system")
         return self.planning.snapshot(project.id)
 
     def cancel(self, project_id: str, task_id: str) -> ProjectSnapshot:
@@ -654,22 +743,12 @@ class ExecutionService:
         choice = decide_untestable(findings, decision)
         flagged = [item for item in stored if item.result == "untestable"]
         if choice == "waive":
-            for item in flagged:
-                item.result = "waived"
-            task.state, task.retry_count = self._move(task, TaskState.GATED)
-            self.planning._event(
-                project,
-                "qa.waived",
+            return self._finish_waive(
+                project_id,
+                task_id,
+                flagged,
                 actor_kind="user",
-                task_id=task.id,
-                payload={
-                    "key": task.key,
-                    "summary": "Accepted without testing "
-                    + ", ".join(item.criterion_key for item in flagged)
-                    + ".",
-                },
             )
-            return self.planning.snapshot(project.id)
         self._send_back(
             project,
             task,
@@ -741,6 +820,7 @@ class ExecutionService:
         summary = ""
         passed_checks: list[CheckResult] = []
         rework = self._rework_text(task)
+        requirements_text = self._requirements_text(project, task)
         while True:
             budget.charge(0)
             ownership = "\n".join(f"{glob} -> {zone}" for glob, zone in rules)
@@ -750,6 +830,7 @@ class ExecutionService:
                 title=task.title,
                 description=task.description,
                 ownership=ownership,
+                requirements=requirements_text,
                 rework=rework,
             )
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
@@ -765,7 +846,15 @@ class ExecutionService:
                 self._escalate_for_clarification(project, task, question)
                 return
             signature = tuple(sorted((item.path, item.content) for item in parsed.writes))
-            if signature == previous:
+            if signature == previous and signature:
+                # Same files again: treat as finished rather than burning the budget.
+                parsed = parsed.model_copy(
+                    update={
+                        "done": True,
+                        "summary": parsed.summary.strip() or "Repeated the same change; accepting it.",
+                    }
+                )
+            elif signature == previous:
                 raise DomainError("The agent repeated the same change. The run was stopped.")
             previous = signature
             for item in parsed.writes:
@@ -870,6 +959,7 @@ class ExecutionService:
             return None
         return SandboxOptions(
             image=self.settings.sandbox_image,
+            node_image=self.settings.sandbox_node_image,
             memory=self.settings.sandbox_memory,
             cpus=self.settings.sandbox_cpus,
             pids_limit=self.settings.sandbox_pids_limit,
@@ -944,6 +1034,8 @@ class ExecutionService:
                 f"@github.com/{project.github_repo}.git"
             )
             try:
+                # Empty repos have no default branch until main is pushed.
+                workspace.push(remote, "main")
                 workspace.push(remote, task.branch_name)
             except RuntimeError as exc:
                 raise DomainError(f"The branch could not be pushed: {exc}") from exc
@@ -994,8 +1086,10 @@ class ExecutionService:
     def _fail(self, project: Project, task: Task, cause: str) -> None:
         task.state, task.retry_count = self._move(task, TaskState.FAILED)
         self.session.flush()
-        self.session.expire(project, ["runs"])
-        spent = sum(run_tokens(run) for run in project.runs if run.task_id == task.id)
+        self.session.expire(project, ["runs", "events"])
+        # Only count tokens since the last human resume (or the whole task if never).
+        # Lifetime spend after earlier failures must not force an instant re-escalate.
+        spent = self._attempt_spend(project, task)
         estimate = int(task.estimate_tokens or 0)
         overspend = spend_exceeds_estimate(
             spent=spent,
@@ -1128,6 +1222,14 @@ class ExecutionService:
                     excerpt=item.excerpt,
                 )
             )
+        # Prior failed check runs leave defects; drop them once the suite is green.
+        if checks and all(item.exit_code == 0 for item in checks):
+            self.session.execute(
+                delete(Defect).where(
+                    Defect.task_id == task.id,
+                    Defect.criterion_key.like("tests/%"),
+                )
+            )
 
     def _send_back(
         self,
@@ -1224,6 +1326,36 @@ class ExecutionService:
             },
         )
         return fix
+
+    def _attempt_spend(self, project: Project, task: Task) -> int:
+        """Tokens used on this task since the last human resume (or all if none)."""
+
+        since = None
+        for event in sorted(project.events, key=lambda item: item.occurred_at, reverse=True):
+            if event.task_id == task.id and event.type == "task.resumed":
+                since = event.occurred_at
+                break
+        total = 0
+        for run in project.runs:
+            if run.task_id != task.id:
+                continue
+            if since is not None and run.created_at < since:
+                continue
+            total += run_tokens(run)
+        return total
+
+    def _requirements_text(self, project: Project, task: Task) -> str:
+        wanted = set(task.requirement_keys)
+        lines: list[str] = []
+        for requirement in sorted(project.requirements, key=lambda item: item.sort_order):
+            if requirement.key not in wanted:
+                continue
+            lines.append(
+                f"{requirement.key} [{requirement.kind}] {requirement.title}: {requirement.statement}"
+            )
+            for criterion in requirement.criteria:
+                lines.append(f"  {criterion.key}: {criterion.statement}")
+        return "\n".join(lines)
 
     def _criteria(self, project: Project, task: Task) -> list[tuple[str, str]]:
         wanted = set(task.requirement_keys)

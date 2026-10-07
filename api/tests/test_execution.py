@@ -217,10 +217,8 @@ def test_automatic_merge_gate_accepts_after_review(tmp_path: Path):
         for event in policy.json()["events"]
     )
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
-    first = _by_key(ran.json(), "TASK-001")
-    reviewed = client.post(f"/api/projects/{project_id}/tasks/{first['id']}/review")
-    assert reviewed.status_code == 200, reviewed.text
-    body = reviewed.json()
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
     assert _by_key(body, "TASK-001")["state"] == "done"
     assert _by_key(body, "TASK-002")["state"] == "ready"
     merge_gate = next(item for item in body["gates"] if item["gate"] == "merge")
@@ -231,6 +229,28 @@ def test_automatic_merge_gate_accepts_after_review(tmp_path: Path):
         and event["actor_kind"] == "system"
         for event in body["events"]
     )
+
+
+def test_automatic_merge_auto_waives_untestable_criteria(tmp_path: Path):
+    client = client_for(tmp_path, _Untestable())
+    project_id = _prepare(client)
+    policy = client.post(
+        f"/api/projects/{project_id}/gate-policy",
+        json={
+            "gate_policy": {"merge": "automatic"},
+            "acknowledgement": "I accept unattended merges for this project.",
+        },
+    )
+    assert policy.status_code == 200, policy.text
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    task = _by_key(body, "TASK-001")
+    assert task["state"] == "done"
+    task_findings = [item for item in body["findings"] if item["task_id"] == task["id"]]
+    assert any(item["result"] == "waived" for item in task_findings)
+    assert any(event["type"] == "qa.waived" and event["actor_kind"] == "system" for event in body["events"])
+    assert "TASK-001 untestable" not in body["project"]["status"]["needs_you"]
 
 
 def test_a_rebase_conflict_on_accept_sends_the_task_back(tmp_path: Path):
@@ -495,13 +515,22 @@ def test_overspending_a_task_estimate_escalates_instead_of_retrying(tmp_path: Pa
     assert failed["payload"]["spend_tokens"] > failed["payload"]["estimate_tokens"]
 
 
-def test_repeating_the_same_change_stops_the_run(tmp_path: Path):
+def test_repeating_the_same_change_is_accepted_as_done(tmp_path: Path):
     client = client_for(tmp_path, _SameChange())
+    project_id = _prepare(client)
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    assert _by_key(body, "TASK-001")["state"] == "in_review"
+    assert (tmp_path / project_id / "server" / "app.py").read_text() == "same\n"
+
+
+def test_repeating_empty_writes_stops_the_run(tmp_path: Path):
+    client = client_for(tmp_path, _EmptyRepeat())
     project_id = _prepare(client)
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
     body = ran.json()
     assert "repeated" in _failure(body)
-    assert not (tmp_path / project_id / "server" / "app.py").exists()
 
 
 def test_a_retry_reuses_the_same_branch(tmp_path: Path):
@@ -856,6 +885,19 @@ class _SameChange(FakeLlm):
                     "done": False,
                     "writes": [{"path": "server/app.py", "content": "same\n"}],
                 },
+                input_tokens=1,
+                output_tokens=1,
+                provider=self.provider,
+                model=self.model,
+            )
+        return super().complete_json(purpose=purpose, system=system, user=user)
+
+
+class _EmptyRepeat(FakeLlm):
+    def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+        if purpose == "implement":
+            return LlmResult(
+                data={"summary": "Nothing.", "done": False, "writes": []},
                 input_tokens=1,
                 output_tokens=1,
                 provider=self.provider,

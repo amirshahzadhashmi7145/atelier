@@ -56,9 +56,16 @@ def architecture_prompt(context: str) -> tuple[str, str]:
     system = (
         "You are the project manager. Propose an architecture a small team can build. "
         "Record each significant choice as a decision with context, options, the choice, "
-        "and the consequences. Declare which directory globs each zone owns. "
+        "and the consequences. Declare which directory globs each zone owns "
+        "(use forms like backend/**, frontend/**, ai/** — covering files at every depth). "
         "Zones are only backend, frontend, and ai_engineer. "
         "Declare the exact commands that run unit, integration, and ui tests. "
+        "Each command is one program plus arguments (no shell chaining). "
+        "Checks run offline in a short-lived container with a read-only project mount, "
+        "so do not rely on package installs. Prefer self-contained smoke commands such as "
+        "python3 -c \"print('unit ok')\" or node -e \"console.log('unit ok')\". "
+        "Only use npm run … when package.json (and any needed files) already live in the tree "
+        "and the scripts need no network install. "
         + JSON_RULES
         + "\nShape: {"
         '"summary": string, '
@@ -76,6 +83,8 @@ def tasks_prompt(context: str) -> tuple[str, str]:
         "depends_on and requirement_indexes are zero-based indexes into your task list "
         "and the requirement list in the context. "
         "A task with no unmet dependency uses an empty depends_on list. "
+        "Every task MUST include at least one requirement_indexes entry; "
+        "never leave requirement_indexes empty. "
         + JSON_RULES
         + "\nShape: {"
         '"tasks": [{"title": string, "description": string, '
