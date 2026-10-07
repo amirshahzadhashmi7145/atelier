@@ -64,9 +64,12 @@ def architecture_prompt(context: str) -> tuple[str, str]:
         "Commands must exercise acceptance behaviour (HTTP status/body, module asserts, "
         "served HTML/JS contracts) — never placeholder smokes like "
         "python3 -c \"print('unit ok')\" or node -e \"console.log('unit ok')\". "
+        "Commands run from the repo root. Paths must match ownership "
+        "(e.g. python3 -m pytest server/tests/unit, npm --prefix web test). "
+        "If you name pytest, engineers must commit requirements.txt including pytest. "
+        "If you name npm/node tests, engineers must commit package.json (root or web/). "
         "Prefer entrypoints such as node scripts/verify.js, npm test, or python -m pytest. "
-        "Declared package.json / requirements.txt dependencies are installed in a writable "
-        "sandbox copy before checks run; the verify commands themselves then run offline. "
+        "Dependencies are installed into the sandbox copy before offline verify runs. "
         + JSON_RULES
         + "\nShape: {"
         '"summary": string, '

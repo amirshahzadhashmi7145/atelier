@@ -40,6 +40,7 @@ def run_in_sandbox(
     pids_limit: int,
     network: bool = False,
     writable: bool = False,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     """Return (exit_code, excerpt) for argv run under Docker."""
 
@@ -69,6 +70,8 @@ def run_in_sandbox(
         docker_argv.extend(["--tmpfs", "/tmp:rw,noexec,nosuid,size=64m"])
     else:
         docker_argv.extend(["--tmpfs", "/tmp:rw,exec,nosuid,size=256m"])
+    for key, value in (env or {}).items():
+        docker_argv.extend(["-e", f"{key}={value}"])
     docker_argv.extend(
         [
             "--cap-drop=ALL",
