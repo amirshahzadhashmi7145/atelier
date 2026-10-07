@@ -22,7 +22,6 @@ from app.domain.gates import (
     DEFAULT_GATE_POLICY,
     is_automatic,
     normalize_gate_policy,
-    require_automation_acknowledgement,
 )
 from app.domain.status import (
     agent_states,
@@ -429,32 +428,19 @@ class PlanningService:
         self,
         project_id: str,
         gate_policy: dict[str, str],
-        acknowledgement: str | None = None,
     ) -> ProjectSnapshot:
         project = self._project(project_id)
         require_active(paused=bool(project.paused))
-        next_policy = normalize_gate_policy(gate_policy)
-        ack = require_automation_acknowledgement(
-            before=project.gate_policy,
-            after=next_policy,
-            acknowledgement=acknowledgement,
-        )
-        project.gate_policy = next_policy
+        project.gate_policy = normalize_gate_policy(gate_policy)
         project.updated_at = utcnow()
-        payload: dict = {
-            "gate_policy": project.gate_policy,
-            "summary": "Approval policy updated.",
-        }
-        if ack:
-            payload["acknowledgement"] = ack
-            payload["summary"] = (
-                "Approval policy updated with acknowledgement for automatic irreversible gates."
-            )
         self._event(
             project,
             "project.gate_policy",
             actor_kind="user",
-            payload=payload,
+            payload={
+                "gate_policy": project.gate_policy,
+                "summary": "Approval policy updated.",
+            },
         )
         self._maybe_auto_approve(project, "requirements")
         self._maybe_auto_approve(project, "architecture")

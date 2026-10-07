@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { RunPipeline } from "@/components/RunPipeline";
 import { api, loadProject, loadTaskDetail } from "@/lib/api";
 import type { Requirement, Snapshot, TaskDetail } from "@/lib/types";
 import {
@@ -35,12 +36,12 @@ const RAIL = [
   { label: "Tasks", hint: "Work, and what it waits on", match: (stage: string) => stage === "tasks_ready" },
 ];
 
-const GATE_LABELS: { key: string; label: string; irreversible?: boolean }[] = [
+const GATE_LABELS: { key: string; label: string }[] = [
   { key: "requirements", label: "Requirements" },
   { key: "architecture", label: "Architecture" },
-  { key: "merge", label: "Merge", irreversible: true },
-  { key: "deployment", label: "Deployment", irreversible: true },
-  { key: "external_side_effects", label: "External effects", irreversible: true },
+  { key: "merge", label: "Merge" },
+  { key: "deployment", label: "Deployment" },
+  { key: "external_side_effects", label: "External effects" },
   { key: "spend_increase", label: "Spend increase" },
 ];
 
@@ -64,7 +65,6 @@ export default function ProjectPage() {
   const [interpretation, setInterpretation] = useState("");
   const [editingRequirement, setEditingRequirement] = useState<string | null>(null);
   const [ceilingInput, setCeilingInput] = useState("");
-  const [gateAck, setGateAck] = useState("");
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
@@ -468,8 +468,13 @@ export default function ProjectPage() {
           <p className="border border-line bg-oxide-soft px-4 py-3 text-sm">
             This plan is coming from the local stand-in, not a model. The gates and the validators are
             real. Set <code>LLM_PROVIDER=openai</code> and an API key when you want a model to write the plan.
+            Fine-tuning cannot force zero model error — Atelier fails closed on evidence, clobber, and staff review instead.
           </p>
-        ) : null}
+        ) : (
+          <p className="border border-line bg-moss-soft px-4 py-3 text-sm text-muted">
+            Live model in use. Bad branches still die at checks / staff / QA — not by hoping the model is perfect.
+          </p>
+        )}
         {error ? <p className="text-sm text-oxide">{error}</p> : null}
 
         <section className="ui-panel p-5">
@@ -538,53 +543,27 @@ export default function ProjectPage() {
         <section className="ui-panel p-5">
           <h2 className="font-serif text-2xl">Approval policy</h2>
           <p className="mt-1 text-sm text-muted">
-            Each gate is human or automatic. Merge, deployment, and external effects need a written
-            acknowledgement before they can run without a person.
+            Each gate is human or automatic. Automatic means the system continues without waiting
+            for you on that step.
           </p>
-          <label className="mt-4 block text-sm">
-            Acknowledgement for irreversible automation
-            <input
-              type="text"
-              value={gateAck}
-              onChange={(event) => setGateAck(event.target.value)}
-              placeholder="I accept unattended merges for this project."
-              className="mt-1 w-full border border-line bg-paper px-3 py-2"
-            />
-          </label>
           <ul className="mt-4 grid gap-3 sm:grid-cols-2">
             {GATE_LABELS.map((gate) => (
               <li key={gate.key} className="flex items-center justify-between gap-3 text-sm">
-                <span>
-                  {gate.label}
-                  {gate.irreversible ? <span className="text-muted"> · irreversible</span> : null}
-                </span>
+                <span>{gate.label}</span>
                 <select
                   disabled={busy || project.paused}
                   value={gatePolicy[gate.key] ?? "human"}
                   className="border border-line bg-paper px-2 py-1"
                   onChange={(event) => {
                     const nextMode = event.target.value;
-                    const needsAck =
-                      gate.irreversible &&
-                      nextMode === "automatic" &&
-                      (gatePolicy[gate.key] ?? "human") !== "automatic";
-                    if (needsAck && !gateAck.trim()) {
-                      setError(
-                        `Write an acknowledgement before setting ${gate.label.toLowerCase()} to automatic.`,
-                      );
-                      return;
-                    }
                     void run(() =>
                       api(`/api/projects/${project.id}/gate-policy`, {
                         method: "POST",
                         body: JSON.stringify({
                           gate_policy: { ...gatePolicy, [gate.key]: nextMode },
-                          acknowledgement: needsAck ? gateAck.trim() : undefined,
                         }),
                       }),
-                    ).then((next) => {
-                      if (next && needsAck) setGateAck("");
-                    });
+                    );
                   }}
                 >
                   <option value="human">Human</option>
@@ -921,41 +900,56 @@ export default function ProjectPage() {
 
         {can("generate_tasks") || snapshot.tasks.length > 0 ? (
           <section className="border border-line bg-white/70 p-5">
-            <h2 className="font-serif text-2xl">Tasks</h2>
-            <p className="mt-1 text-sm text-muted">
-              Ready means the orchestrator may claim it. The agent writes only inside its zone, on a branch,
-              and the architecture&apos;s test commands must pass in a container before that branch is
-              committed and a pull request is opened. Review runs those commands again, then checks the
-              acceptance criteria. A failing command sends the task back. A criterion the review cannot
-              execute waits for you to waive it or send the task back. Accepting a passed review rebases
-              onto main, re-runs the checks, then merges and unblocks whatever was waiting. After too many
-              failed attempts a task escalates and waits for you to resume it.
-            </p>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="font-serif text-2xl">Tasks</h2>
+                <p className="mt-1 max-w-2xl text-sm text-muted">
+                  Each run is fail-closed: implement → sandbox checks → full-stack staff gate → QA →
+                  merge. Progress updates live while a run is in flight.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {can("run_ready") ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="bg-ink px-4 py-2.5 text-sm text-paper transition hover:bg-[#2c261f]"
+                    onClick={() =>
+                      run(() => api(`/api/projects/${project.id}/tasks/run`, { method: "POST" }))
+                    }
+                  >
+                    {busy ? "Running…" : "Run the next ready task"}
+                  </button>
+                ) : null}
+                {can("generate_tasks") ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="border border-ink px-4 py-2.5 text-sm transition hover:bg-paper"
+                    onClick={() =>
+                      run(() => api(`/api/projects/${project.id}/tasks`, { method: "POST" }))
+                    }
+                  >
+                    Break into tasks
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {(busy ||
+              snapshot.tasks.some((task) =>
+                ["in_progress", "in_review", "gated"].includes(task.state),
+              )) && (
+              <div className="mt-5">
+                <RunPipeline snapshot={snapshot} busy={busy} />
+              </div>
+            )}
+
             {status.needs_you.length > 0 ? (
               <p className="mt-4 border border-oxide bg-oxide-soft px-4 py-3 text-sm">
                 Waiting on you: {status.needs_you.join(" · ")}. Answer + resume that task below, or
                 keep running other ready work.
               </p>
-            ) : null}
-            {can("run_ready") ? (
-              <button
-                type="button"
-                disabled={busy}
-                className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
-                onClick={() => run(() => api(`/api/projects/${project.id}/tasks/run`, { method: "POST" }))}
-              >
-                Run the next ready task
-              </button>
-            ) : null}
-            {can("generate_tasks") ? (
-              <button
-                type="button"
-                disabled={busy}
-                className="mt-4 bg-ink px-3 py-2 text-sm text-paper"
-                onClick={() => run(() => api(`/api/projects/${project.id}/tasks`, { method: "POST" }))}
-              >
-                Break into tasks
-              </button>
             ) : null}
             {project.uncovered_requirement_keys.length > 0 ? (
               <p className="mt-4 text-sm text-oxide">

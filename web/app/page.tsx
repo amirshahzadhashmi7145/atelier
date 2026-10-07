@@ -84,8 +84,8 @@ export default function HomePage() {
             Describe it. Watch the team build.
           </p>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-muted md:text-lg">
-            PM plans. Engineers take desks by zone. QA reviews. You approve the gates that matter —
-            with live status the whole way.
+            PM plans. Engineers take desks by zone. Staff reviews every branch. QA judges criteria.
+            You approve the gates that matter — with live status the whole way.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <a href="#start" className="ui-btn bg-ink px-5 py-2.5 text-sm text-paper hover:bg-[#2c261f]">

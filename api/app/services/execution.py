@@ -21,7 +21,7 @@ from app.domain.actions import action_kind
 from app.domain.control import require_active, require_agents
 from app.domain.ac_evidence import blob_from_test_writes, evidence_gaps
 from app.domain.dependencies import dependency_files, forbidden_dependency_sources
-from app.domain.preserve import missing_from_rewrites
+from app.domain.preserve import materialize_writes, missing_from_rewrites
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
@@ -75,12 +75,19 @@ class _Write(BaseModel):
     content: str
 
 
+class _Edit(BaseModel):
+    path: str = Field(min_length=1)
+    old_string: str = Field(min_length=1)
+    new_string: str
+
+
 class _Implement(BaseModel):
     summary: str = ""
     done: bool = False
     needs_clarification: bool = False
     clarification: str = ""
     writes: list[_Write] = []
+    edits: list[_Edit] = []
 
 
 class _FindingIn(BaseModel):
@@ -957,8 +964,15 @@ class ExecutionService:
                     question = "The task is under-specified."
                 self._escalate_for_clarification(project, task, question)
                 return
-            signature = tuple(sorted((item.path, item.content) for item in parsed.writes))
-            if signature == previous and signature:
+            signature = (
+                tuple(sorted((item.path, item.content) for item in parsed.writes)),
+                tuple(
+                    sorted(
+                        (item.path, item.old_string, item.new_string) for item in parsed.edits
+                    )
+                ),
+            )
+            if signature == previous and (parsed.writes or parsed.edits):
                 # Same files again: treat as finished rather than burning the budget.
                 parsed = parsed.model_copy(
                     update={
@@ -970,10 +984,12 @@ class ExecutionService:
                 raise DomainError("The agent repeated the same change. The run was stopped.")
             for item in parsed.writes:
                 require_inside_zone(item.path, task.zone, rules)
+            for item in parsed.edits:
+                require_inside_zone(item.path, task.zone, rules)
             if not parsed.done:
                 # Models often return writes with done=false and burn the iteration
                 # budget without ever committing. Treat in-zone writes as finished.
-                if parsed.writes:
+                if parsed.writes or parsed.edits:
                     parsed = parsed.model_copy(
                         update={
                             "done": True,
@@ -986,12 +1002,23 @@ class ExecutionService:
                     # reply trips the repeat stop instead of the iteration budget.
                     previous = signature
                     continue
-            if not parsed.writes:
+            if not parsed.writes and not parsed.edits:
                 raise DomainError("The agent finished without writing a file.", status_code=422)
             summary = parsed.summary.strip()
             if not summary:
                 raise DomainError("The agent finished without a summary.", status_code=422)
-            writes = [(item.path, item.content) for item in parsed.writes]
+            try:
+                writes = materialize_writes(
+                    workspace.root,
+                    [(item.path, item.content) for item in parsed.writes],
+                    [
+                        (item.path, item.old_string, item.new_string)
+                        for item in parsed.edits
+                    ],
+                )
+            except ValueError as exc:
+                rework = f"Your last edit could not be applied: {exc}\n" + (rework or "")
+                continue
             blocked_deps = forbidden_dependency_sources(
                 writes=writes,
                 allowed_hosts=self.settings.allowed_dependency_host_set,
@@ -1008,8 +1035,8 @@ class ExecutionService:
                 rework = (
                     "Your last write dropped symbols still required by earlier tasks:\n"
                     + "\n".join(clobbered)
-                    + "\nCopy the existing file forward, keep those names, then add only "
-                    "this task's endpoint and tests.\n"
+                    + "\nUse edits (search/replace) on the existing file, or copy it "
+                    "forward and only add this task's endpoint and tests.\n"
                     + (rework or "")
                 )
                 continue

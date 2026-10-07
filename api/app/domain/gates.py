@@ -27,10 +27,6 @@ DEFAULT_GATE_POLICY: dict[str, str] = {
     "spend_increase": "human",
 }
 
-# Setting these to automatic removes a person from an irreversible step.
-IRREVERSIBLE_GATES = frozenset({"merge", "deployment", "external_side_effects"})
-
-
 def normalize_gate_policy(raw: dict | None) -> dict[str, str]:
     policy = dict(DEFAULT_GATE_POLICY)
     if not raw:
@@ -51,40 +47,3 @@ def normalize_gate_policy(raw: dict | None) -> dict[str, str]:
 
 def is_automatic(policy: dict | None, gate: str) -> bool:
     return normalize_gate_policy(policy).get(gate) == "automatic"
-
-
-def gates_newly_automatic(*, before: dict | None, after: dict | None) -> list[str]:
-    """Irreversible gates that move from human (or unset) to automatic."""
-
-    previous = normalize_gate_policy(before)
-    current = normalize_gate_policy(after)
-    return sorted(
-        gate
-        for gate in IRREVERSIBLE_GATES
-        if previous.get(gate) != "automatic" and current.get(gate) == "automatic"
-    )
-
-
-def require_automation_acknowledgement(
-    *,
-    before: dict | None,
-    after: dict | None,
-    acknowledgement: str | None,
-) -> str | None:
-    """Demand a separate acknowledgement when irreversible gates go automatic.
-
-    Returns the cleaned acknowledgement when one was required, else None.
-    """
-
-    newly = gates_newly_automatic(before=before, after=after)
-    if not newly:
-        return None
-    text = (acknowledgement or "").strip()
-    if not text:
-        names = ", ".join(newly)
-        raise DomainError(
-            f"Setting {names} to automatic needs an explicit acknowledgement "
-            "that irreversible steps may run without a person.",
-            status_code=422,
-        )
-    return text

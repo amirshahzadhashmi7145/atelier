@@ -26,6 +26,25 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.run-pipeline-track {
+  border-radius: 999px;
+}
+
+.run-pipeline-fill {
+  background: linear-gradient(90deg, #1c1915 0%, #3f6212 55%, #1c1915 100%);
+  background-size: 200% 100%;
+  animation: run-pipeline-shimmer 1.4s linear infinite;
+}
+
+@keyframes run-pipeline-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .office-page {
   background:
     radial-gradient(ellipse at 20% 0%, rgba(232, 165, 75, 0.12), transparent 45%),
