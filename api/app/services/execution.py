@@ -13,6 +13,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.agents.developer import implement_prompt
+from app.agents.staff import staff_review_prompt
 from app.agents.qa import review_prompt
 from app.config import Settings
 from app.domain.budget import BudgetExceeded, RunBudget
@@ -24,6 +25,7 @@ from app.domain.preserve import missing_from_rewrites
 from app.domain.test_integrity import weakened_tests
 from app.domain.pull_request import CheckLine, compose
 from app.domain.qa import Finding, decide_untestable, judge
+from app.domain.staff_gate import force_evidenced_passes, staff_gate_issues
 from app.domain.gates import is_automatic
 from app.domain.spend import require_spend_room, run_tokens, spend_exceeds_estimate, tokens_used
 from app.domain.schedule import ClaimCandidate, choose_next
@@ -97,6 +99,17 @@ class _FindingIn(BaseModel):
 
 class _ReviewIn(BaseModel):
     findings: list[_FindingIn] = Field(min_length=1)
+
+
+class _StaffIssueIn(BaseModel):
+    code: str = ""
+    detail: str = ""
+
+
+class _StaffReviewIn(BaseModel):
+    verdict: str
+    summary: str = ""
+    issues: list[_StaffIssueIn] = []
 
 
 class ExecutionService:
@@ -218,6 +231,92 @@ class ExecutionService:
         rendered = "\n".join(
             f"- {item.tier}: {item.command} exited {item.exit_code}\n  {item.excerpt}" for item in checks
         )
+        main_files = self._main_file_texts(workspace, diff)
+        gate_issues = staff_gate_issues(
+            root=workspace.root,
+            main_files=main_files,
+            criteria=criteria,
+            check_excerpts=rendered,
+        )
+        gate_notes = "\n".join(f"- {code}: {detail}" for code, detail in gate_issues)
+        staff_system, staff_user = staff_review_prompt(
+            task_key=task.key,
+            title=task.title,
+            zone=task.zone,
+            criteria=criteria,
+            checks=rendered,
+            diff=diff,
+            gate_notes=gate_notes,
+        )
+        staff_result = self.llm.complete_json(
+            purpose="staff_review", system=staff_system, user=staff_user
+        )
+        self._record_run(
+            project,
+            task,
+            staff_result.provider,
+            staff_result.model,
+            staff_result.input_tokens,
+            staff_result.output_tokens,
+            role="fullstack",
+            purpose="staff_review",
+        )
+        staff = self._parse_staff_review(staff_result.data)
+        if gate_issues or staff.verdict != "pass":
+            defects = [
+                (
+                    f"staff/{code}",
+                    "Full-stack staff review of the task branch.",
+                    detail,
+                    "Branch keeps prior APIs and evidences every acceptance criterion in tests.",
+                )
+                for code, detail in gate_issues
+            ]
+            for issue in staff.issues:
+                detail = (issue.detail or issue.code or "").strip()
+                if not detail:
+                    continue
+                defects.append(
+                    (
+                        f"staff/{issue.code or 'review'}",
+                        "Full-stack staff review of the task branch.",
+                        detail,
+                        "Address the staff engineer's findings, then re-run.",
+                    )
+                )
+            if not defects:
+                defects.append(
+                    (
+                        "staff/review",
+                        "Full-stack staff review of the task branch.",
+                        staff.summary.strip() or "Staff review rejected the branch.",
+                        "Address the staff engineer's findings, then re-run.",
+                    )
+                )
+            self._send_back(
+                project,
+                task,
+                defects,
+                staff.summary.strip()
+                or (
+                    "Full-stack staff review rejected the branch. "
+                    "The task is ready for another attempt."
+                ),
+                event_type="staff.failed",
+                actor_role="fullstack",
+            )
+            return self.planning.snapshot(project.id)
+        self.planning._event(
+            project,
+            "staff.passed",
+            actor_kind="agent",
+            actor_role="fullstack",
+            task_id=task.id,
+            payload={
+                "key": task.key,
+                "summary": staff.summary.strip() or "Staff review passed.",
+            },
+        )
         system, user = review_prompt(
             task_key=task.key,
             title=task.title,
@@ -248,6 +347,12 @@ class ExecutionService:
             )
             for item in parsed.findings
         ]
+        findings = force_evidenced_passes(
+            criteria,
+            findings,
+            check_excerpts=rendered,
+            root=workspace.root,
+        )
         verdict = judge([key for key, _statement in criteria], findings)
         self.session.execute(delete(CriterionFinding).where(CriterionFinding.task_id == task.id))
         for item in findings:
@@ -877,6 +982,9 @@ class ExecutionService:
                         }
                     )
                 else:
+                    # Empty no-op: remember the signature so the next identical
+                    # reply trips the repeat stop instead of the iteration budget.
+                    previous = signature
                     continue
             if not parsed.writes:
                 raise DomainError("The agent finished without writing a file.", status_code=422)
@@ -1512,6 +1620,43 @@ class ExecutionService:
                 f"The model reply failed validation at '{loc}'. Nothing was recorded.",
                 status_code=502,
             ) from exc
+
+    def _parse_staff_review(self, data: dict) -> _StaffReviewIn:
+        try:
+            parsed = _StaffReviewIn.model_validate(data)
+        except ValidationError as exc:
+            loc = ".".join(str(part) for part in exc.errors()[0]["loc"])
+            raise DomainError(
+                f"The staff review reply failed validation at '{loc}'. Nothing was recorded.",
+                status_code=502,
+            ) from exc
+        if parsed.verdict not in {"pass", "fail"}:
+            raise DomainError(
+                "Staff review verdict must be pass or fail. Nothing was recorded.",
+                status_code=502,
+            )
+        return parsed
+
+    def _main_file_texts(self, workspace: Workspace, diff: str) -> dict[str, str]:
+        """Load main-branch contents for paths touched in the diff."""
+
+        paths: set[str] = set()
+        for line in diff.splitlines():
+            if line.startswith("+++ b/"):
+                rel = line[6:].strip()
+                if rel and rel != "/dev/null":
+                    paths.add(rel)
+            elif line.startswith("diff --git "):
+                parts = line.split()
+                if len(parts) >= 4 and parts[3].startswith("b/"):
+                    paths.add(parts[3][2:])
+        texts: dict[str, str] = {}
+        for rel in paths:
+            try:
+                texts[rel] = workspace._git("show", f"main:{rel}")
+            except RuntimeError:
+                continue
+        return texts
 
     def _note_tokens(self, budget: RunBudget, tokens: int) -> None:
         budget.tokens += tokens

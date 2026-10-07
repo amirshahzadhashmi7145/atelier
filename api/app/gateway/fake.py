@@ -20,6 +20,7 @@ class FakeLlm:
             "architecture": _architecture,
             "tasks": _tasks,
             "implement": _implement,
+            "staff_review": _staff_review,
             "qa": _qa,
         }[purpose]
         return LlmResult(
@@ -163,19 +164,68 @@ def _subject(user: str) -> str:
 def _implement(user: str) -> dict:
     if "Zone: frontend" in user:
         path = "web/page.tsx"
-        content = "export default function Page() {\n  return <p>Ready</p>;\n}\n"
+        content = (
+            "export default function Page() {\n"
+            "  // UI contract: handle 201 create and 200 reads.\n"
+            "  return <p>Ready 201 200 401 404 413 422</p>;\n"
+            "}\n"
+        )
+        test_path = "web/page.test.js"
+        test_content = (
+            "test('ui handles status codes', () => {\n"
+            "  assert.match('201 200 401 404 413 422', /201/);\n"
+            "});\n"
+        )
     elif "Zone: ai_engineer" in user:
         path = "server/ai/pipeline.py"
         content = "def run() -> None:\n    return None\n"
+        test_path = "server/ai/test_pipeline.py"
+        test_content = (
+            "def test_pipeline_ok() -> None:\n"
+            "    assert True  # 200 path for AI jobs\n"
+        )
     else:
         path = "server/app.py"
-        content = "def create_record() -> dict:\n    return {\"id\": \"1\"}\n"
+        content = (
+            "def create_record() -> dict:\n"
+            "    return {\"id\": \"1\", \"status_code\": 201}\n"
+            "\n"
+            "def reset_store() -> None:\n"
+            "    return None\n"
+        )
+        test_path = "server/test_app.py"
+        test_content = (
+            "def test_create_record_returns_201() -> None:\n"
+            "    assert create_record()[\"status_code\"] == 201\n"
+            "    # Also cover sibling codes named in acceptance criteria.\n"
+            "    assert {401, 404, 413, 422, 200}\n"
+        )
     if "Previous review failed" in user:
         content += "# revised after review\n"
+    writes = [
+        {"path": path, "content": content},
+        {"path": test_path, "content": test_content},
+    ]
     return {
         "summary": "Added the first file for this task.",
         "done": True,
-        "writes": [{"path": path, "content": content}],
+        "writes": writes,
+    }
+
+
+def _staff_review(user: str) -> dict:
+    if "Deterministic staff gate:\n- " in user and "(no deterministic issues)" not in user.split(
+        "Deterministic staff gate:\n", 1
+    )[-1].split("\n\n", 1)[0]:
+        return {
+            "verdict": "fail",
+            "summary": "Deterministic staff gate reported issues.",
+            "issues": [{"code": "gate", "detail": "Fix deterministic staff gate findings."}],
+        }
+    return {
+        "verdict": "pass",
+        "summary": "Staff review accepts the branch.",
+        "issues": [],
     }
 
 

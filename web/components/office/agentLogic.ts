@@ -1,6 +1,6 @@
 import type { Snapshot } from "@/lib/types";
 
-export type DeskId = "pm" | "backend" | "frontend" | "ai_engineer" | "qa";
+export type DeskId = "pm" | "backend" | "frontend" | "ai_engineer" | "fullstack" | "qa";
 
 export type Gender = "male" | "female";
 
@@ -74,6 +74,19 @@ export const DESKS: Desk[] = [
     hair: "#1a1614",
   },
   {
+    id: "fullstack",
+    title: "Mr.",
+    name: "Bilal Ahmed",
+    label: "Mr. Bilal Ahmed",
+    gender: "male",
+    roleTitle: "Full-Stack Staff Engineer",
+    role: "fullstack",
+    x: 0.8,
+    z: 1.6,
+    skin: "#b88962",
+    hair: "#1f1a16",
+  },
+  {
     id: "qa",
     title: "Ms.",
     name: "Sana Malik",
@@ -81,7 +94,7 @@ export const DESKS: Desk[] = [
     gender: "female",
     roleTitle: "QA Lead",
     role: "qa",
-    x: 2.2,
+    x: 3.6,
     z: 1.6,
     skin: "#c9956c",
     hair: "#2c1810",
@@ -282,6 +295,7 @@ const COLORS: Record<DeskId, string> = {
   backend: "#243d32",
   frontend: "#2f4458",
   ai_engineer: "#5a4a28",
+  fullstack: "#4a3a58",
   qa: "#3a5c18",
 };
 
@@ -309,6 +323,9 @@ function normalizeRole(role: string): DeskId | null {
   if (key === "backend") return "backend";
   if (key === "frontend") return "frontend";
   if (key === "ai_engineer" || key === "ai") return "ai_engineer";
+  if (key === "fullstack" || key === "full_stack" || key === "staff" || key === "staff_engineer") {
+    return "fullstack";
+  }
   if (key === "qa" || key === "qa_engineer") return "qa";
   return null;
 }
@@ -750,6 +767,22 @@ const BANTER: { a: DeskId; b: DeskId; lines: [string, string] }[] = [
     a: "qa",
     b: "backend",
     lines: ["Ali, can you share repro steps for that 500?", "Sana, pushing a fix branch now — try again in a bit."],
+  },
+  {
+    a: "fullstack",
+    b: "backend",
+    lines: [
+      "Ali, keep reset_store and the old routes — extend, don't rewrite.",
+      "Bilal, on it — tests will assert the 201 body fields.",
+    ],
+  },
+  {
+    a: "fullstack",
+    b: "qa",
+    lines: [
+      "Sana, staff gate is green — your turn on the criteria.",
+      "Bilal, thanks — I'll only pass what the excerpts prove.",
+    ],
   },
   {
     a: "pm",

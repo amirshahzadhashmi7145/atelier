@@ -48,6 +48,8 @@ _OUTCOMES = {
     "qa.untestable",
     "qa.tests_weakened",
     "qa.deps_blocked",
+    "staff.passed",
+    "staff.failed",
     "task.accepted",
     "task.failed",
     "task.claimed",
