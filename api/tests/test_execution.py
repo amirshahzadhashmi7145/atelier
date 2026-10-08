@@ -1,4 +1,5 @@
 import subprocess
+import threading
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -84,6 +85,84 @@ def test_task_detail_includes_runs_checks_pr_and_diff(tmp_path: Path):
     assert missing.status_code == 404
 
 
+def test_run_phases_are_visible_while_implement_is_in_flight(tmp_path: Path):
+    """Live run UI polls GET during POST /tasks/run — phases must commit early."""
+
+    ready = threading.Event()
+    release = threading.Event()
+
+    class _HoldImplement(FakeLlm):
+        def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+            if purpose == "implement":
+                ready.set()
+                assert release.wait(timeout=15), "implement was not released"
+            return super().complete_json(purpose=purpose, system=system, user=user)
+
+    settings = Settings(
+        database_url="sqlite:///:memory:",
+        llm_provider="fake",
+        workspaces_dir=str(tmp_path),
+        check_sandbox=False,
+    )
+    app = create_app(settings=settings, llm=_HoldImplement())
+    runner = TestClient(app)
+    poller = TestClient(app)
+    project_id = _prepare(runner)
+    errors: list[str] = []
+
+    def _run() -> None:
+        try:
+            response = runner.post(f"/api/projects/{project_id}/tasks/run")
+            if response.status_code != 200:
+                errors.append(response.text)
+        except Exception as exc:  # pragma: no cover - surfaced via errors
+            errors.append(str(exc))
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    assert ready.wait(timeout=30), "implement never started"
+    snapshot = poller.get(f"/api/projects/{project_id}").json()
+    assert any(task["state"] == "in_progress" for task in snapshot["tasks"])
+    phases = [
+        event["payload"]["phase"]
+        for event in snapshot["events"]
+        if event["type"] == "run.phase"
+    ]
+    assert "implement" in phases, snapshot["events"][:8]
+    assert "claim" in phases
+    release.set()
+    thread.join(timeout=60)
+    assert not thread.is_alive()
+    assert not errors, errors
+    finished = poller.get(f"/api/projects/{project_id}").json()
+    all_phases = {
+        event["payload"]["phase"]
+        for event in finished["events"]
+        if event["type"] == "run.phase"
+    }
+    # Default merge gate is human, so the run stops at staff / in_review.
+    assert {"claim", "implement", "checks", "staff"} <= all_phases
+    task = next(item for item in finished["tasks"] if item["key"] == "TASK-001")
+    assert task["state"] == "in_review"
+
+
+def test_review_publishes_qa_and_gate_phases(tmp_path: Path):
+    client = client_for(tmp_path)
+    project_id = _prepare(client)
+    client.post(
+        f"/api/projects/{project_id}/gate-policy",
+        json={"gate_policy": {"merge": "automatic"}},
+    )
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    phases = {
+        event["payload"]["phase"]
+        for event in ran.json()["events"]
+        if event["type"] == "run.phase"
+    }
+    assert {"claim", "implement", "checks", "staff", "qa", "gate"} <= phases
+
+
 def test_a_person_can_amend_a_file_on_the_task_branch(tmp_path: Path):
     client = client_for(tmp_path)
     project_id = _prepare(client)
@@ -134,14 +213,84 @@ def test_a_person_can_reassign_a_ready_task_to_another_zone(tmp_path: Path):
     event = next(item for item in body["events"] if item["type"] == "task.reassigned")
     assert event["payload"]["from_zone"] == "backend"
     assert event["payload"]["to_zone"] == "frontend"
+    # Put it back so the fake backend implementer can finish the run.
+    restored = client.post(
+        f"/api/projects/{project_id}/tasks/{first['id']}/reassign",
+        json={"zone": "backend"},
+    )
+    assert restored.status_code == 200, restored.text
     ran = client.post(f"/api/projects/{project_id}/tasks/run")
     in_review = _by_key(ran.json(), "TASK-001")
+    assert in_review["state"] == "in_review"
     refused = client.post(
         f"/api/projects/{project_id}/tasks/{in_review['id']}/reassign",
-        json={"zone": "backend"},
+        json={"zone": "frontend"},
     )
     assert refused.status_code == 409
     assert "reassigned" in refused.json()["detail"].lower() or "cannot be reassigned" in refused.json()["detail"]
+
+
+def test_run_auto_reassigns_when_writes_belong_to_another_zone(tmp_path: Path):
+    """Mis-zoned tasks (Wirebound TASK-008) self-heal instead of escalating."""
+
+    class _BackendFilesEvenOnFrontend(FakeLlm):
+        def complete_json(self, *, purpose: str, system: str, user: str) -> LlmResult:
+            if purpose == "implement":
+                # Ignore zone line — always write backend paths (wrong zone case).
+                return LlmResult(
+                    data={
+                        "summary": "Backend files despite frontend zone.",
+                        "done": True,
+                        "writes": [
+                            {
+                                "path": "server/app.py",
+                                "content": (
+                                    "def create_record() -> dict:\n"
+                                    '    return {"id": "1", "status_code": 201}\n'
+                                    "\ndef reset_store() -> None:\n"
+                                    "    return None\n"
+                                ),
+                            },
+                            {
+                                "path": "server/test_app.py",
+                                "content": (
+                                    "def test_create_record_returns_201() -> None:\n"
+                                    '    assert create_record()["status_code"] == 201\n'
+                                    "    assert {401, 404, 413, 422, 200}\n"
+                                ),
+                            },
+                        ],
+                    },
+                    input_tokens=1,
+                    output_tokens=1,
+                    provider=self.provider,
+                    model=self.model,
+                )
+            return super().complete_json(purpose=purpose, system=system, user=user)
+
+    client = client_for(tmp_path, llm=_BackendFilesEvenOnFrontend())
+    project_id = _prepare(client)
+    first = _by_key(client.get(f"/api/projects/{project_id}").json(), "TASK-001")
+    moved = client.post(
+        f"/api/projects/{project_id}/tasks/{first['id']}/reassign",
+        json={"zone": "frontend"},
+    )
+    assert moved.status_code == 200, moved.text
+    ran = client.post(f"/api/projects/{project_id}/tasks/run")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    task = _by_key(body, "TASK-001")
+    assert task["zone"] == "backend"
+    assert task["state"] == "in_review"
+    auto = [
+        event
+        for event in body["events"]
+        if event["type"] == "task.reassigned"
+        and event["payload"].get("reason") == "writes_owned_by_target_zone"
+    ]
+    assert auto, body["events"][:12]
+    assert auto[0]["payload"]["from_zone"] == "frontend"
+    assert auto[0]["payload"]["to_zone"] == "backend"
 
 
 def test_accepting_a_run_merges_it_and_unblocks_the_next_task(tmp_path: Path):

@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.errors import DomainError
+from app.domain.preserve import normalize_package_json
 from app.services.sandbox import image_for_program, run_in_sandbox
+from app.services.scaffold import ensure_vitest_node_shims
 
 TIERS = ("unit", "integration", "ui")
 _OPERATORS = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<"}
@@ -115,6 +117,10 @@ def _run_sandboxed(
         shutil.copytree(root, work, dirs_exist_ok=True, ignore=_ignore_vcs)
         # Sandbox drops CAP_DAC_OVERRIDE — host-private (0700) dirs are invisible inside Docker.
         _relax_tree_permissions(work)
+        # Agents often call requestAnimationFrame at import time; Node has none.
+        ensure_vitest_node_shims(work)
+        # Repair double-encoded package.json before npm sees it.
+        _repair_package_json_files(work)
         install_timeout = max(timeout, 120)
         blocked, hard_fail = _prepare_dependencies(work, planned, sandbox, install_timeout)
         if hard_fail is not None:
@@ -251,6 +257,27 @@ def _npm_package_dirs(root: Path) -> list[Path]:
         if package.is_file():
             found.append(package.parent)
     return found
+
+
+def _repair_package_json_files(root: Path) -> None:
+    """Rewrite double-encoded package.json files in place on the sandbox copy."""
+
+    for directory in _npm_package_dirs(root):
+        path = directory / "package.json"
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        try:
+            json.loads(raw)
+            continue
+        except json.JSONDecodeError:
+            pass
+        try:
+            path.write_text(normalize_package_json(raw), encoding="utf-8")
+        except ValueError:
+            # Leave broken; npm will fail with a clear excerpt.
+            continue
 
 
 def _npm_install_prefixes(root: Path) -> list[str]:

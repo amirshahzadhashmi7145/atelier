@@ -1023,10 +1023,18 @@ class PlanningService:
             prepared.append((item, keys[index], requirement_keys, depends))
         require_acyclic(keys, edges)
 
+        from app.domain.zone_infer import normalize_task_zone
+
         id_by_key: dict[str, str] = {}
         for item, key, requirement_keys, depends in prepared:
             task_id = new_id("tsk")
             id_by_key[key] = task_id
+            zone = normalize_task_zone(
+                zone=item.zone,
+                title=item.title,
+                description=item.description,
+                known_zones=known_zones,
+            )
             self.session.add(
                 Task(
                     id=task_id,
@@ -1034,7 +1042,7 @@ class PlanningService:
                     key=key,
                     title=item.title.strip(),
                     description=item.description.strip(),
-                    zone=item.zone,
+                    zone=zone,
                     state=place(blocked=bool(depends)).value,
                     size=item.size,
                     estimate_tokens=estimate_tokens_for_size(

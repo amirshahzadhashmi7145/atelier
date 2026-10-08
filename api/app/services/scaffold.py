@@ -7,11 +7,32 @@ tests that match the strategy. Agents expand these files inside their zones.
 from __future__ import annotations
 
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from app.services.workspace import Workspace
 
 _JS_TEST_TOKENS = ("vitest", "jest", "mocha")
+
+# Vitest runs in Node. Agents often call browser animation APIs at import time;
+# these shims keep unit/integration green without hand-fixing every task.
+_VITEST_SETUP = """\
+// Atelier: Node has no browser animation APIs. Vitest loads this before tests.
+if (typeof globalThis.requestAnimationFrame !== "function") {
+  globalThis.requestAnimationFrame = (cb) =>
+    setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 16);
+}
+if (typeof globalThis.cancelAnimationFrame !== "function") {
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+}
+"""
+
+_VITEST_CONFIG = """\
+export default {
+  test: {
+    setupFiles: ["./vitest.setup.mjs"],
+  },
+};
+"""
 
 
 def ownership_roots(ownership: list[tuple[str, str]]) -> dict[str, str]:
@@ -149,6 +170,10 @@ def scaffold_writes(
                 "node ./node_modules/vitest/vitest.mjs --run --pool=threads --maxWorkers=1"
             )
             pkg["devDependencies"] = {"vitest": "^3.0.0"}
+            setup_path = f"{pkg_dir}/vitest.setup.mjs" if pkg_dir else "vitest.setup.mjs"
+            config_path = f"{pkg_dir}/vitest.config.mjs" if pkg_dir else "vitest.config.mjs"
+            writes.append((setup_path, _VITEST_SETUP))
+            writes.append((config_path, _VITEST_CONFIG))
             # .mjs so package.json can stay CommonJS for scripts/verify_ui.js.
             harness = f"{pkg_dir}/tests/harness.test.mjs" if pkg_dir else "tests/harness.test.mjs"
             writes.append(
@@ -199,6 +224,50 @@ def apply_scaffold(
         return []
     workspace.commit("ARCH", "Seed zone layout and test harnesses.", writes, role="system")
     return [relative for relative, _content in writes]
+
+
+def ensure_vitest_node_shims(root: Path) -> list[str]:
+    """Write requestAnimationFrame shims into Vitest packages when missing.
+
+    Safe to call on a sandbox copy before verify — does not touch .git.
+    Returns relative paths that were created.
+    """
+
+    created: list[str] = []
+    for package_dir in _vitest_package_dirs(root):
+        setup = package_dir / "vitest.setup.mjs"
+        config = package_dir / "vitest.config.mjs"
+        if not setup.is_file():
+            setup.write_text(_VITEST_SETUP, encoding="utf-8")
+            created.append(str(setup.relative_to(root)).replace("\\", "/"))
+        if not config.is_file():
+            config.write_text(_VITEST_CONFIG, encoding="utf-8")
+            created.append(str(config.relative_to(root)).replace("\\", "/"))
+    return created
+
+
+def _vitest_package_dirs(root: Path) -> list[Path]:
+    found: list[Path] = []
+    for relative in (".", "web", "frontend", "client"):
+        package = root / relative / "package.json" if relative != "." else root / "package.json"
+        if not package.is_file():
+            continue
+        try:
+            data = json.loads(package.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        blob = json.dumps(
+            {
+                "scripts": data.get("scripts") or {},
+                "devDependencies": data.get("devDependencies") or {},
+                "dependencies": data.get("dependencies") or {},
+            }
+        ).lower()
+        if "vitest" in blob:
+            found.append(package.parent)
+    return found
 
 
 def _merge_package_json(existing_text: str, desired_text: str) -> str | None:

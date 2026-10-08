@@ -58,9 +58,29 @@ def test_scaffold_seeds_vitest_when_strategy_names_it():
     writes = dict(scaffold_writes(ownership, strategy))
     assert "frontend/package.json" in writes
     assert "frontend/tests/harness.test.mjs" in writes
+    assert "frontend/vitest.setup.mjs" in writes
+    assert "frontend/vitest.config.mjs" in writes
+    assert "requestAnimationFrame" in writes["frontend/vitest.setup.mjs"]
     pkg = writes["frontend/package.json"]
     assert "vitest" in pkg
     assert "devDependencies" in pkg
+
+
+def test_ensure_vitest_node_shims_adds_raf_polyfill(tmp_path: Path):
+    from app.services.scaffold import ensure_vitest_node_shims
+
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text(
+        '{"name":"demo","devDependencies":{"vitest":"^3.0.0"}}',
+        encoding="utf-8",
+    )
+    created = ensure_vitest_node_shims(tmp_path)
+    assert "frontend/vitest.setup.mjs" in created
+    assert "frontend/vitest.config.mjs" in created
+    assert "requestAnimationFrame" in (frontend / "vitest.setup.mjs").read_text(encoding="utf-8")
+    # Second pass is a no-op (does not clobber).
+    assert ensure_vitest_node_shims(tmp_path) == []
 
 
 def test_apply_scaffold_commits_on_main(tmp_path: Path):

@@ -40,6 +40,7 @@ _ARTEFACTS = {
     "assumption.recorded",
     "plan.stage_changed",
     "workspace.scaffolded",
+    "run.phase",
 }
 
 _OUTCOMES = {
