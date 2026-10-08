@@ -1063,6 +1063,15 @@ class ExecutionService:
                     + (rework or "")
                 )
                 continue
+            jsx_issue = _jsx_without_react(
+                workspace.root,
+                writes,
+                tech_preferences=project.tech_preferences or "",
+                architecture_summary=project.architecture_summary or "",
+            )
+            if jsx_issue:
+                rework = jsx_issue + "\n" + (rework or "")
+                continue
             blocked_deps = forbidden_dependency_sources(
                 writes=writes,
                 allowed_hosts=self.settings.allowed_dependency_host_set,
@@ -1834,3 +1843,73 @@ def _effective_writes(root: Path, writes: list[tuple[str, str]]) -> list[tuple[s
                 pass
         out.append((relative, content))
     return out
+
+
+def _package_declares_react(root: Path, writes: list[tuple[str, str]]) -> bool:
+    texts: list[str] = []
+    for relative, content in writes:
+        if relative.replace("\\", "/").endswith("package.json"):
+            texts.append(content)
+    for relative in ("package.json", "frontend/package.json", "web/package.json"):
+        path = root / relative
+        if path.is_file():
+            try:
+                texts.append(path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+    for text in texts:
+        lowered = text.lower()
+        if '"react"' in lowered or "'react'" in lowered:
+            return True
+    return False
+
+
+def _jsx_without_react(
+    root: Path,
+    writes: list[tuple[str, str]],
+    *,
+    tech_preferences: str,
+    architecture_summary: str,
+) -> str | None:
+    """Reject React/JSX when the project forbids a UI framework and has no React dep."""
+
+    context = f"{tech_preferences}\n{architecture_summary}".lower()
+    forbids = any(
+        needle in context
+        for needle in (
+            "no ui framework",
+            "no game engine or ui framework",
+            "without react",
+            "no react",
+            "plain dom",
+            "html canvas",
+        )
+    )
+    if not forbids and _package_declares_react(root, writes):
+        return None
+    jsx_paths: list[str] = []
+    for relative, content in writes:
+        rel = relative.replace("\\", "/")
+        if rel.endswith((".tsx", ".jsx")):
+            jsx_paths.append(rel)
+            continue
+        if "from 'react'" in content or 'from "react"' in content:
+            jsx_paths.append(rel)
+            continue
+        if "@testing-library/react" in content:
+            jsx_paths.append(rel)
+            continue
+        # JSX tag usage in .js/.ts/.mjs tests (e.g. render(<HUD …/>)).
+        if "<" in content and ("/>" in content or "</" in content) and (
+            "render(" in content or "React." in content or "jsx" in content.lower()
+        ):
+            jsx_paths.append(rel)
+    if not jsx_paths:
+        return None
+    if _package_declares_react(root, writes) and not forbids:
+        return None
+    return (
+        "This project does not use React/JSX (tech preferences / architecture). "
+        "Rewrite without JSX or @testing-library/react — plain TypeScript/DOM "
+        f"modules and Vitest on exported helpers. Offending paths: {', '.join(jsx_paths)}."
+    )

@@ -62,6 +62,10 @@ def implement_prompt(
         "unused React islands the HTML never loads. "
         "If the project uses npm, keep package.json scripts runnable after install "
         "(Atelier installs dependencies into the sandbox before checks). "
+        "Respect tech preferences and architecture: if the project forbids a UI "
+        "framework / React, do NOT write JSX, .tsx, React components, or "
+        "@testing-library/react tests — use plain TypeScript/DOM (or Canvas) and "
+        "Vitest assertions on exported functions or document DOM APIs. "
         + JSON_RULES
         + '\nShape: {"summary": string, "done": boolean, '
         '"needs_clarification": boolean, "clarification": string, '
