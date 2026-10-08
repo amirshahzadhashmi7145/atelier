@@ -43,6 +43,8 @@ def implement_prompt(
         "response fields from the criteria so the review can mark them pass. "
         "Keep existing passing harness or feature tests; extend them for this task's "
         "criteria instead of deleting them. "
+        "Do NOT rewrite scripts/verify_ui.js, *harness* test files, or tests/harness.test.mjs "
+        "— those are scaffold harnesses. Add sibling feature tests and app code instead. "
         "CRITICAL — edit like Cursor, do not clobber: for files that already exist, prefer "
         "edits (search/replace) over full writes. old_string must be a non-empty exact "
         "snippet that appears once. Never send old_string as \"\". "

@@ -74,3 +74,31 @@ def test_missing_from_rewrites_flags_clobber(tmp_path: Path):
     assert reasons
     assert "reset_store" in reasons[0]
     assert "create_connection" in reasons[0]
+
+
+def test_materialize_keeps_verify_ui_scaffold(tmp_path: Path):
+    path = tmp_path / "frontend" / "scripts" / "verify_ui.js"
+    path.parent.mkdir(parents=True)
+    original = (
+        "const assert = require('assert');\n"
+        "const fs = require('fs');\n"
+        "const path = require('path');\n"
+        "const pkg = path.join(__dirname, '..', 'package.json');\n"
+        "assert.ok(fs.existsSync(pkg));\n"
+        "process.exit(0);\n"
+    )
+    path.write_text(original, encoding="utf-8")
+    writes = materialize_writes(
+        tmp_path,
+        [
+            (
+                "frontend/scripts/verify_ui.js",
+                "const vite = require('vite');\nprocess.exit(0);\n",
+            ),
+            ("frontend/src/Hud.js", "export function Hud() { return null; }\n"),
+        ],
+        [],
+    )
+    by_path = dict(writes)
+    assert by_path["frontend/scripts/verify_ui.js"] == original
+    assert "Hud" in by_path["frontend/src/Hud.js"]
