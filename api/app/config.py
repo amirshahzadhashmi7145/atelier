@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     check_sandbox: bool = True
     sandbox_image: str = "python:3.12-slim"
     sandbox_node_image: str = "node:20-slim"
-    sandbox_memory: str = "256m"
+    sandbox_memory: str = "512m"
     sandbox_cpus: str = "1"
-    sandbox_pids_limit: int = 64
+    sandbox_pids_limit: int = 256
     github_token: str = ""
     github_api_url: str = "https://api.github.com"
     # Comma-separated hosts agents may pull packages from (FR-DEV-8).

@@ -27,8 +27,22 @@ from app.services.sandbox import image_for_program, run_in_sandbox
 TIERS = ("unit", "integration", "ui")
 _OPERATORS = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<"}
 _DEPS_DIR = ".deps"
-_NODE_PROGRAMS = frozenset({"node", "nodejs", "npm", "npx", "yarn", "pnpm", "bun"})
+_NODE_PROGRAMS = frozenset(
+    {
+        "node",
+        "nodejs",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "bun",
+        "vitest",
+        "jest",
+        "mocha",
+    }
+)
 _PYTHON_PROGRAMS = frozenset({"python", "python3", "pytest", "pip", "pip3"})
+_JS_TEST_BINARIES = frozenset({"vitest", "jest", "mocha"})
 
 
 @dataclass(frozen=True)
@@ -124,6 +138,10 @@ def _ignore_vcs(directory: str, names: list[str]) -> set[str]:
     ignored = set()
     if ".git" in names:
         ignored.add(".git")
+    # Always reinstall inside the sandbox copy — host node_modules may lack +x
+    # (NTFS/fuseblk) or be the wrong platform.
+    if "node_modules" in names:
+        ignored.add("node_modules")
     return ignored
 
 
@@ -272,7 +290,8 @@ def _relax_tree_permissions(root: Path) -> None:
             if path.is_dir():
                 path.chmod(0o777)
             else:
-                path.chmod(0o666)
+                # Keep execute bits for package bins when the filesystem allows them.
+                path.chmod(0o777)
         except OSError:
             continue
 
@@ -331,6 +350,37 @@ def _normalize_python_argv(argv: list[str]) -> list[str]:
     return argv
 
 
+def _package_prefix(root: Path) -> str | None:
+    if (root / "package.json").is_file():
+        return ""
+    for folder in ("frontend", "web", "client"):
+        if (root / folder / "package.json").is_file():
+            return folder
+    return None
+
+
+def _normalize_node_argv(root: Path, argv: list[str]) -> list[str]:
+    """Turn bare vitest/jest into npm run so cwd is the package root."""
+
+    if not argv:
+        return argv
+    name = Path(argv[0]).name.lower()
+    if name not in _JS_TEST_BINARIES:
+        return argv
+    prefix = _package_prefix(root)
+    script = "test:unit" if name == "vitest" else "test"
+    if prefix is None:
+        # No package.json yet — still force Node via npx so image routing is correct.
+        return ["npx", "--no-install", name, *argv[1:]]
+    if prefix == "":
+        return ["npm", "run", script]
+    return ["npm", "--prefix", prefix, "run", script]
+
+
+def _normalize_check_argv(root: Path, argv: list[str]) -> list[str]:
+    return _normalize_node_argv(root, _normalize_python_argv(argv))
+
+
 def _run_sandbox_command(
     root: Path,
     tier: str,
@@ -338,7 +388,7 @@ def _run_sandbox_command(
     timeout: int,
     sandbox: SandboxOptions,
 ) -> CheckResult:
-    argv = _normalize_python_argv(parse_command(command))
+    argv = _normalize_check_argv(root, parse_command(command))
     program = Path(argv[0]).name.lower()
     image = image_for_program(
         argv[0],
@@ -370,7 +420,7 @@ def _run_sandbox_command(
 
 
 def _run_host(root: Path, tier: str, command: str, timeout: int) -> CheckResult:
-    argv = parse_command(command)
+    argv = _normalize_check_argv(root, parse_command(command))
     try:
         completed = subprocess.run(
             argv,

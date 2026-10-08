@@ -1,6 +1,10 @@
 import pytest
 
-from app.domain.test_strategy import is_trivial_test_command, validate_test_strategy
+from app.domain.test_strategy import (
+    is_trivial_test_command,
+    normalize_test_strategy,
+    validate_test_strategy,
+)
 from app.errors import DomainError
 
 
@@ -38,3 +42,16 @@ def test_validate_test_strategy_accepts_real_commands():
             "ui": "npm test",
         }
     )
+
+
+def test_normalize_rewrites_bare_vitest_to_npm_exec():
+    out = normalize_test_strategy(
+        {
+            "unit": "vitest --run",
+            "integration": "vitest --run",
+            "ui": "npm --prefix frontend test",
+        }
+    )
+    assert out["unit"] == "npm --prefix frontend run test:unit"
+    assert out["integration"] == "npm --prefix frontend run test:unit"
+    assert out["ui"] == "npm --prefix frontend test"

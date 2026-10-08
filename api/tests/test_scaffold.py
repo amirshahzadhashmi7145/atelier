@@ -48,6 +48,21 @@ def test_scaffold_honours_npm_prefix_frontend():
     assert "backend/tests/unit/test_backend_tests_unit_harness.py" in paths
 
 
+def test_scaffold_seeds_vitest_when_strategy_names_it():
+    ownership = [("frontend/**", "frontend")]
+    strategy = {
+        "unit": "vitest --run",
+        "integration": "vitest --run",
+        "ui": "npm --prefix frontend test",
+    }
+    writes = dict(scaffold_writes(ownership, strategy))
+    assert "frontend/package.json" in writes
+    assert "frontend/tests/harness.test.mjs" in writes
+    pkg = writes["frontend/package.json"]
+    assert "vitest" in pkg
+    assert "devDependencies" in pkg
+
+
 def test_apply_scaffold_commits_on_main(tmp_path: Path):
     workspace = Workspace(tmp_path)
     written = apply_scaffold(

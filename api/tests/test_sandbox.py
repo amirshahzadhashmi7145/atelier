@@ -19,6 +19,14 @@ def test_image_for_program_picks_node_for_npm():
     )
     assert (
         image_for_program(
+            "vitest",
+            default_image="python:3.12-slim",
+            node_image="node:20-slim",
+        )
+        == "node:20-slim"
+    )
+    assert (
+        image_for_program(
             "python3",
             default_image="python:3.12-slim",
             node_image="node:20-slim",
@@ -123,6 +131,39 @@ def test_run_checks_uses_the_node_image_for_npm(tmp_path: Path):
 
     assert all(item.exit_code == 0 for item in results)
     assert images == ["node:20-slim", "node:20-slim", "node:20-slim"]
+
+
+def test_run_checks_rewrites_bare_vitest_to_npm_exec(tmp_path: Path):
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text(
+        '{"name":"demo","devDependencies":{"vitest":"^3.0.0"}}',
+        encoding="utf-8",
+    )
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_sandbox(root, argv, **kwargs):
+        calls.append((list(argv), kwargs["image"]))
+        if argv[:1] == ["npm"] and "install" in argv:
+            (frontend / "node_modules").mkdir(exist_ok=True)
+        return 0, "ok"
+
+    with patch("app.services.checks.run_in_sandbox", side_effect=fake_sandbox):
+        results = run_checks(
+            tmp_path,
+            {
+                "unit": "vitest --run",
+                "integration": "vitest --run",
+                "ui": "npm --prefix frontend test",
+            },
+            timeout=5,
+            sandbox=SandboxOptions(image="python:3.12-slim", node_image="node:20-slim"),
+        )
+
+    assert all(item.exit_code == 0 for item in results)
+    verify = [argv for argv, _image in calls if "install" not in argv]
+    assert verify[0][:5] == ["npm", "--prefix", "frontend", "run", "test:unit"]
+    assert all(image == "node:20-slim" for _argv, image in calls)
 
 
 def test_run_checks_installs_npm_deps_before_verify(tmp_path: Path):

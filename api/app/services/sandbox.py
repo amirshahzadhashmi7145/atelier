@@ -8,7 +8,20 @@ dependencies can be fetched before offline verify commands run.
 import subprocess
 from pathlib import Path
 
-_NODE_PROGRAMS = frozenset({"node", "nodejs", "npm", "npx", "yarn", "pnpm", "bun"})
+_NODE_PROGRAMS = frozenset(
+    {
+        "node",
+        "nodejs",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "bun",
+        "vitest",
+        "jest",
+        "mocha",
+    }
+)
 _PYTHON_PROGRAMS = frozenset({"python", "python3", "pytest", "pip", "pip3"})
 
 

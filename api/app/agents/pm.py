@@ -72,6 +72,10 @@ def architecture_prompt(context: str) -> tuple[str, str]:
         "requirements.txt including pytest. "
         "If you name npm/node tests, also own package.json (root or frontend/). "
         "Prefer entrypoints such as node scripts/verify.js, npm test, or python -m pytest. "
+        "Never declare a bare JS test binary (vitest/jest/mocha) — use "
+        "npm --prefix frontend run test:unit (or npm test) so cwd and PATH work in the sandbox. "
+        "If you name Vitest/Jest, put package.json under frontend/ with that tool in "
+        "devDependencies. "
         "Dependencies are installed into the sandbox copy before offline verify runs. "
         + JSON_RULES
         + "\nShape: {"
