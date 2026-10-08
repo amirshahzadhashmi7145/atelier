@@ -7,10 +7,13 @@ Architecture must name commands that exercise behaviour, not
 from __future__ import annotations
 
 import re
+import shlex
+from pathlib import Path
 
 from app.errors import DomainError
 
 TIERS = ("unit", "integration", "ui")
+_JS_TEST_BINARIES = frozenset({"vitest", "jest", "mocha"})
 
 _OK_PRINT = re.compile(
     r"""(?ix)
@@ -36,6 +39,43 @@ def is_trivial_test_command(command: str) -> bool:
     ):
         return False
     return True
+
+
+def normalize_test_strategy(
+    strategy: dict,
+    *,
+    package_prefix: str = "frontend",
+) -> dict[str, str]:
+    """Rewrite bare JS test binaries so the sandbox can exec them.
+
+    `vitest --run` is not on PATH in the Node image. Prefer
+    `npm --prefix <dir> run test:unit` so npm sets cwd to the package root
+    (vitest discovers tests) and local node_modules/.bin is used.
+    """
+
+    out: dict[str, str] = {}
+    for name in TIERS:
+        command = str(strategy.get(name, "")).strip()
+        if not command:
+            out[name] = command
+            continue
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            out[name] = command
+            continue
+        if not parts:
+            out[name] = command
+            continue
+        binary = Path(parts[0]).name.lower()
+        if binary not in _JS_TEST_BINARIES:
+            out[name] = command
+            continue
+        prefix = (package_prefix or "frontend").strip().strip("/") or "frontend"
+        script = "test:unit" if binary == "vitest" else "test"
+        rewritten = ["npm", "--prefix", prefix, "run", script]
+        out[name] = " ".join(shlex.quote(part) for part in rewritten)
+    return out
 
 
 def validate_test_strategy(strategy: dict) -> None:

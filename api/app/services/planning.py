@@ -931,14 +931,18 @@ class PlanningService:
         system, user = pm.architecture_prompt(self._transcript(project))
         result = self._complete(project, "architecture", system, user)
         parsed = _parse(_ArchitectureIn, result.data)
-        self._check_test_strategy(parsed.test_strategy)
+        strategy = self._normalized_test_strategy(
+            parsed.test_strategy,
+            [(rule.glob, rule.zone) for rule in parsed.ownership],
+        )
+        self._check_test_strategy(strategy)
         for rule in parsed.ownership:
             if rule.zone not in {"backend", "frontend", "ai_engineer"}:
                 raise DomainError(f"Unknown ownership zone '{rule.zone}'.", status_code=502)
 
         self._clear_architecture(project)
         project.architecture_summary = parsed.summary.strip()
-        project.test_strategy = {key: value.strip() for key, value in parsed.test_strategy.items()}
+        project.test_strategy = strategy
         for rule in parsed.ownership:
             self.session.add(
                 OwnershipRule(
@@ -1115,6 +1119,10 @@ class PlanningService:
             if decision == "approved":
                 if not project.architecture_summary or not project.ownership or not project.test_strategy:
                     raise DomainError("The architecture is incomplete.", status_code=422)
+                project.test_strategy = self._normalized_test_strategy(
+                    project.test_strategy,
+                    [(rule.glob, rule.zone) for rule in project.ownership],
+                )
                 self._check_test_strategy(project.test_strategy)
         else:
             raise DomainError("Unknown gate.", status_code=422)
@@ -1378,6 +1386,20 @@ class PlanningService:
         from app.domain.test_strategy import validate_test_strategy
 
         validate_test_strategy(strategy)
+
+    def _normalized_test_strategy(
+        self,
+        strategy: dict,
+        ownership: list[tuple[str, str]] | None = None,
+    ) -> dict[str, str]:
+        from app.domain.test_strategy import normalize_test_strategy
+        from app.services.scaffold import ownership_roots
+
+        prefix = "frontend"
+        if ownership:
+            roots = ownership_roots(ownership)
+            prefix = roots.get("frontend") or roots.get("backend") or "frontend"
+        return normalize_test_strategy(strategy, package_prefix=prefix)
 
     def _augment_ownership_for_tests(self, project: Project) -> None:
         """Let engineers maintain harness paths the architecture's commands name."""

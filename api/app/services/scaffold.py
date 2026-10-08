@@ -11,6 +11,9 @@ from pathlib import PurePosixPath
 
 from app.services.workspace import Workspace
 
+_JS_TEST_TOKENS = ("vitest", "jest", "mocha")
+
+
 def ownership_roots(ownership: list[tuple[str, str]]) -> dict[str, str]:
     """Map zone -> first directory root from globs like backend/**."""
 
@@ -38,12 +41,16 @@ def ensure_test_ownership(
     existing = {(pattern, zone) for pattern, zone in ownership}
     extra: list[tuple[str, str]] = []
     commands = " ".join(str(strategy.get(tier, "")) for tier in ("unit", "integration", "ui"))
-    if "pytest" in commands.lower() or "python" in commands.lower():
+    lowered = commands.lower()
+    if "pytest" in lowered or "python" in lowered:
         for pattern, zone in (("tests/**", "backend"), ("requirements.txt", "backend")):
             if (pattern, zone) not in existing and not any(p == pattern for p, _z in ownership):
                 extra.append((pattern, zone))
-    if any(prog in commands.lower() for prog in ("npm", "npx", "node ", "yarn", "pnpm")):
-        prefix = _npm_prefix(str(strategy.get("ui", "")))
+    needs_node = any(
+        prog in lowered for prog in ("npm", "npx", "node ", "yarn", "pnpm", *_JS_TEST_TOKENS)
+    )
+    if needs_node:
+        prefix = _npm_prefix(str(strategy.get("ui", ""))) or _js_package_prefix(strategy)
         patterns = [
             ("package.json", "frontend"),
             ("package-lock.json", "frontend"),
@@ -102,10 +109,15 @@ def scaffold_writes(
                     )
                 )
 
-    if any(token in joined for token in ("npm", "npx", "yarn", "pnpm", "node ")):
-        frontend = roots.get("frontend", "frontend")
+    needs_node = any(
+        token in joined for token in ("npm", "npx", "yarn", "pnpm", "node ", *_JS_TEST_TOKENS)
+    )
+    if needs_node:
         # `npm --prefix <dir> test` needs package.json under <dir>; bare `npm test` at root.
-        prefix = _npm_prefix(commands.get("ui", ""))
+        prefix = _npm_prefix(commands.get("ui", "")) or _js_package_prefix(strategy)
+        # Default frontend zone when vitest/jest is declared without an npm --prefix.
+        if prefix is None and any(token in joined for token in _JS_TEST_TOKENS):
+            prefix = roots.get("frontend", "frontend")
         pkg_dir = prefix or ""
         ui_script = f"{pkg_dir}/scripts/verify_ui.js" if pkg_dir else "scripts/verify_ui.js"
         pkg_path = f"{pkg_dir}/package.json" if pkg_dir else "package.json"
@@ -123,22 +135,38 @@ def scaffold_writes(
                 ),
             )
         )
-        writes.append(
-            (
-                pkg_path,
-                json.dumps(
-                    {
-                        "name": "atelier-frontend" if pkg_dir else "atelier-project",
-                        "private": True,
-                        "scripts": {
-                            "test": "node scripts/verify_ui.js",
-                        },
-                    },
-                    indent=2,
-                )
-                + "\n",
+        pkg: dict = {
+            "name": "atelier-frontend" if pkg_dir else "atelier-project",
+            "private": True,
+            "scripts": {
+                "test": "node scripts/verify_ui.js",
+            },
+        }
+        if "vitest" in joined:
+            # Invoke via node — workspace disks (e.g. NTFS) often strip +x on .bin shims.
+            # Single worker stays under the sandbox pids limit.
+            pkg["scripts"]["test:unit"] = (
+                "node ./node_modules/vitest/vitest.mjs --run --pool=threads --maxWorkers=1"
             )
-        )
+            pkg["devDependencies"] = {"vitest": "^3.0.0"}
+            # .mjs so package.json can stay CommonJS for scripts/verify_ui.js.
+            harness = f"{pkg_dir}/tests/harness.test.mjs" if pkg_dir else "tests/harness.test.mjs"
+            writes.append(
+                (
+                    harness,
+                    (
+                        "import { describe, expect, it } from 'vitest';\n\n"
+                        "describe('harness', () => {\n"
+                        "  it('collects', () => {\n"
+                        "    expect(true).toBe(true);\n"
+                        "  });\n"
+                        "});\n"
+                    ),
+                )
+            )
+        elif "jest" in joined:
+            pkg["devDependencies"] = {"jest": "^29.7.0"}
+        writes.append((pkg_path, json.dumps(pkg, indent=2) + "\n"))
 
     # Deduplicate by path (last wins).
     by_path: dict[str, str] = {}
@@ -160,13 +188,49 @@ def apply_scaffold(
     for relative, content in scaffold_writes(ownership, strategy):
         path = workspace.root / relative
         if path.exists():
-            # Do not clobber agent or prior scaffold content.
+            # Merge vitest/jest deps into an existing package.json; never clobber other files.
+            if path.name == "package.json":
+                merged = _merge_package_json(path.read_text(encoding="utf-8"), content)
+                if merged is not None and merged != path.read_text(encoding="utf-8"):
+                    writes.append((relative, merged))
             continue
         writes.append((relative, content))
     if not writes:
         return []
     workspace.commit("ARCH", "Seed zone layout and test harnesses.", writes, role="system")
     return [relative for relative, _content in writes]
+
+
+def _merge_package_json(existing_text: str, desired_text: str) -> str | None:
+    """Add missing scripts/devDependencies from the scaffold desired manifest."""
+
+    try:
+        existing = json.loads(existing_text)
+        desired = json.loads(desired_text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(existing, dict) or not isinstance(desired, dict):
+        return None
+    changed = False
+    scripts = existing.setdefault("scripts", {})
+    if not isinstance(scripts, dict):
+        scripts = {}
+        existing["scripts"] = scripts
+    for key, value in (desired.get("scripts") or {}).items():
+        if key not in scripts:
+            scripts[key] = value
+            changed = True
+    dev = existing.setdefault("devDependencies", {})
+    if not isinstance(dev, dict):
+        dev = {}
+        existing["devDependencies"] = dev
+    for key, value in (desired.get("devDependencies") or {}).items():
+        if key not in dev:
+            dev[key] = value
+            changed = True
+    if not changed:
+        return None
+    return json.dumps(existing, indent=2) + "\n"
 
 
 def _npm_prefix(command: str) -> str | None:
@@ -178,6 +242,16 @@ def _npm_prefix(command: str) -> str | None:
             return parts[index + 1].strip("'\"").rstrip("/")
         if part.startswith("--prefix="):
             return part.split("=", 1)[1].strip("'\"").rstrip("/")
+    return None
+
+
+def _js_package_prefix(strategy: dict[str, str]) -> str | None:
+    """Infer package dir from normalized `npm --prefix <dir> exec -- vitest` commands."""
+
+    for tier in ("unit", "integration", "ui"):
+        prefix = _npm_prefix(str(strategy.get(tier, "")))
+        if prefix:
+            return prefix
     return None
 
 
