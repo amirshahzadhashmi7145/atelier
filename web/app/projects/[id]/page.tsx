@@ -1146,30 +1146,25 @@ export default function ProjectPage() {
                     {task.state === "escalated" ? (
                       <div className="mt-2 space-y-2 border border-oxide-soft bg-oxide-soft/40 p-3">
                         {(() => {
-                          const clarification = [...snapshot.events]
-                            .reverse()
-                            .find(
-                              (event) =>
-                                event.type === "task.needs_clarification" &&
-                                typeof event.payload?.key === "string" &&
-                                event.payload.key === task.key,
-                            );
-                          const failure = [...snapshot.events]
-                            .reverse()
-                            .find(
-                              (event) =>
-                                event.type === "task.failed" &&
-                                typeof event.payload?.key === "string" &&
-                                event.payload.key === task.key,
-                            );
-                          const overspend = [...snapshot.events]
-                            .reverse()
-                            .find(
-                              (event) =>
-                                event.type === "task.spend_overspend" &&
-                                typeof event.payload?.key === "string" &&
-                                event.payload.key === task.key,
-                            );
+                          // Snapshot events are newest-first — do not reverse before find.
+                          const clarification = snapshot.events.find(
+                            (event) =>
+                              event.type === "task.needs_clarification" &&
+                              typeof event.payload?.key === "string" &&
+                              event.payload.key === task.key,
+                          );
+                          const failure = snapshot.events.find(
+                            (event) =>
+                              event.type === "task.failed" &&
+                              typeof event.payload?.key === "string" &&
+                              event.payload.key === task.key,
+                          );
+                          const overspend = snapshot.events.find(
+                            (event) =>
+                              event.type === "task.spend_overspend" &&
+                              typeof event.payload?.key === "string" &&
+                              event.payload.key === task.key,
+                          );
                           if (clarification) {
                             const text =
                               typeof clarification.payload?.clarification === "string"
@@ -1189,7 +1184,7 @@ export default function ProjectPage() {
                           if (failure && typeof failure.payload?.cause === "string") {
                             return (
                               <p className="text-sm text-ink">
-                                Escalated after failures: {failure.payload.cause}
+                                Last failure: {failure.payload.cause}
                               </p>
                             );
                           }
@@ -1201,7 +1196,7 @@ export default function ProjectPage() {
                           );
                         })()}
                         <label className="block text-sm">
-                          Your answer (optional — appended to the task)
+                          Optional guidance for the next attempt (not a planning clarification)
                           <textarea
                             value={resumeAnswers[task.id] ?? ""}
                             onChange={(event) =>
@@ -1209,7 +1204,7 @@ export default function ProjectPage() {
                             }
                             rows={2}
                             className="mt-1 w-full border border-line bg-paper px-3 py-2"
-                            placeholder="e.g. Win = three in a row; response 'Congratulation {name} you won', status 200"
+                            placeholder="e.g. Put level and progress in frontend/src/hud.ts and assert them in a Vitest file"
                           />
                         </label>
                         <button

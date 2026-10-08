@@ -1051,6 +1051,18 @@ class ExecutionService:
             except ValueError as exc:
                 rework = f"Your last edit could not be applied: {exc}\n" + (rework or "")
                 continue
+            writes = _effective_writes(workspace.root, writes)
+            if not writes:
+                # Protected scaffold / identical content — do not burn a retry on
+                # "nothing to commit" after green harness checks.
+                rework = (
+                    "Your writes did not change any files. Scaffold harnesses "
+                    "(scripts/verify_ui.js, *harness* tests) are protected — add new "
+                    "feature files for this task (e.g. frontend/src/… and a sibling "
+                    "Vitest that asserts the HUD level/progress criteria).\n"
+                    + (rework or "")
+                )
+                continue
             blocked_deps = forbidden_dependency_sources(
                 writes=writes,
                 allowed_hosts=self.settings.allowed_dependency_host_set,
@@ -1806,3 +1818,19 @@ class ExecutionService:
 
     def _root(self, project: Project) -> Path:
         return Path(self.settings.workspaces_dir) / project.id
+
+
+def _effective_writes(root: Path, writes: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Drop paths whose content already matches the working tree."""
+
+    out: list[tuple[str, str]] = []
+    for relative, content in writes:
+        path = root / relative
+        if path.is_file():
+            try:
+                if path.read_text(encoding="utf-8") == content:
+                    continue
+            except OSError:
+                pass
+        out.append((relative, content))
+    return out
