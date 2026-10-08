@@ -66,6 +66,20 @@ def is_harness_path(relative: str) -> bool:
     )
 
 
+def is_protected_scaffold_path(relative: str) -> bool:
+    """Scaffold files agents must not rewrite (green day-one checks)."""
+
+    rel = relative.replace("\\", "/")
+    name = rel.rsplit("/", 1)[-1]
+    if is_harness_path(rel):
+        return True
+    if name == "verify_ui.js":
+        return True
+    if name.endswith(".test.mjs") and "/tests/" in f"/{rel}":
+        return True
+    return False
+
+
 def materialize_writes(
     root: Path,
     writes: list[tuple[str, str]],
@@ -75,7 +89,8 @@ def materialize_writes(
 
     Edits are Cursor-like search/replace (exactly one match). Full writes to
     existing .py files keep any top-level symbols the rewrite would drop.
-    Scaffold harness tests are never overwritten — agents add sibling files.
+    Scaffold harness tests and verify_ui.js are never overwritten — agents
+    add sibling feature files instead.
     """
 
     files: dict[str, str] = {}
@@ -84,6 +99,9 @@ def materialize_writes(
 
     for relative, old, new in edits:
         rel = relative.replace("\\", "/")
+        if is_protected_scaffold_path(rel):
+            # Ignore edits that would break the green scaffold harness.
+            continue
         if not old:
             raise ValueError(f"{rel}: edit old_string must not be empty.")
         base = files.get(rel)
@@ -102,7 +120,7 @@ def materialize_writes(
     out: list[tuple[str, str]] = []
     for rel, content in sorted(files.items()):
         path = root / rel
-        if is_harness_path(rel) and path.is_file():
+        if is_protected_scaffold_path(rel) and path.is_file():
             # Keep the green collect harness; agents must add new test modules.
             try:
                 out.append((rel, path.read_text(encoding="utf-8")))

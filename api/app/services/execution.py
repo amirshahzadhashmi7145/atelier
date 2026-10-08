@@ -1516,14 +1516,14 @@ class ExecutionService:
                     excerpt=item.excerpt,
                 )
             )
-        # Prior failed check runs leave defects; drop them once the suite is green.
-        if checks and all(item.exit_code == 0 for item in checks):
-            self.session.execute(
-                delete(Defect).where(
-                    Defect.task_id == task.id,
-                    Defect.criterion_key.like("tests/%"),
-                )
+        # Drop prior check defects every time — otherwise stale vitest/PATH
+        # failures keep showing after a later run already fixed those tiers.
+        self.session.execute(
+            delete(Defect).where(
+                Defect.task_id == task.id,
+                Defect.criterion_key.like("tests/%"),
             )
+        )
 
     def _send_back(
         self,
