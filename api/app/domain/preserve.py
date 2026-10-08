@@ -59,6 +59,13 @@ def merge_keeping_symbols(previous: str, proposed: str) -> str:
     return proposed.rstrip() + "\n\n" + "\n\n".join(chunks) + "\n"
 
 
+def is_harness_path(relative: str) -> bool:
+    name = relative.replace("\\", "/").rsplit("/", 1)[-1]
+    return name == "test_harness.py" or (
+        name.startswith("test_") and name.endswith("_harness.py")
+    )
+
+
 def materialize_writes(
     root: Path,
     writes: list[tuple[str, str]],
@@ -68,6 +75,7 @@ def materialize_writes(
 
     Edits are Cursor-like search/replace (exactly one match). Full writes to
     existing .py files keep any top-level symbols the rewrite would drop.
+    Scaffold harness tests are never overwritten — agents add sibling files.
     """
 
     files: dict[str, str] = {}
@@ -94,6 +102,13 @@ def materialize_writes(
     out: list[tuple[str, str]] = []
     for rel, content in sorted(files.items()):
         path = root / rel
+        if is_harness_path(rel) and path.is_file():
+            # Keep the green collect harness; agents must add new test modules.
+            try:
+                out.append((rel, path.read_text(encoding="utf-8")))
+            except OSError:
+                out.append((rel, content))
+            continue
         if path.is_file() and rel.endswith(".py"):
             try:
                 previous = path.read_text(encoding="utf-8")
