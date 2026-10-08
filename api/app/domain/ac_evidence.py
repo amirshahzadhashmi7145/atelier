@@ -73,6 +73,10 @@ def evidenced_keys(
     return covered
 
 
+def has_extractable_signals(statement: str) -> bool:
+    return bool(_needles(statement))
+
+
 def _needles(statement: str) -> list[str]:
     found: list[str] = []
     for match in _STATUS.finditer(statement):

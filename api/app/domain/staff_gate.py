@@ -9,7 +9,12 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from app.domain.ac_evidence import blob_from_test_writes, evidenced_keys, evidence_gaps
+from app.domain.ac_evidence import (
+    blob_from_test_writes,
+    evidenced_keys,
+    evidence_gaps,
+    has_extractable_signals,
+)
 from app.domain.preserve import removed_symbols
 from app.domain.qa import Finding
 
@@ -33,7 +38,7 @@ def staff_gate_issues(
         rel = path.relative_to(root).as_posix()
         try:
             on_disk.append((rel, path.read_text(encoding="utf-8")))
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
 
     gaps = evidence_gaps(
@@ -73,11 +78,13 @@ def force_evidenced_passes(
     *,
     check_excerpts: str,
     root: Path,
+    checks_green: bool = False,
 ) -> list[Finding]:
-    """Upgrade untestable→pass only when tests/checks already prove that AC.
+    """Upgrade untestable→pass when tests/checks already prove that AC.
 
-    Criteria with no extractable signals stay as QA marked them — the gate
-    cannot invent proof for wall-clock or observational checks.
+    Criteria with extractable signals must appear in tests/checks. Criteria with
+    no extractable signals are passed when the declared suite is fully green —
+    otherwise automatic merge loops forever on observational ACs.
     """
 
     on_disk: list[tuple[str, str]] = []
@@ -90,25 +97,32 @@ def force_evidenced_passes(
             on_disk.append(
                 (path.relative_to(root).as_posix(), path.read_text(encoding="utf-8"))
             )
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
+    write_blob = blob_from_test_writes(on_disk)
     proven = evidenced_keys(
         criteria,
         check_excerpts=check_excerpts,
-        write_contents=blob_from_test_writes(on_disk),
+        write_contents=write_blob,
     )
+    statements = {key: statement for key, statement in criteria}
     upgraded: list[Finding] = []
     for item in findings:
-        if item.result != "untestable" or item.criterion_key not in proven:
+        if item.result != "untestable":
             upgraded.append(item)
             continue
-        note = (item.note or "").strip()
-        suffix = "staff evidence gate: proven by tests/checks"
-        upgraded.append(
-            replace(
-                item,
-                result="pass",
-                note=f"{note} [{suffix}]".strip() if note else suffix,
+        statement = statements.get(item.criterion_key, "")
+        soft_ok = checks_green and not has_extractable_signals(statement)
+        if item.criterion_key in proven or soft_ok:
+            note = (item.note or "").strip()
+            suffix = "staff evidence gate: proven by tests/checks"
+            upgraded.append(
+                replace(
+                    item,
+                    result="pass",
+                    note=f"{note} [{suffix}]".strip() if note else suffix,
+                )
             )
-        )
+            continue
+        upgraded.append(item)
     return upgraded

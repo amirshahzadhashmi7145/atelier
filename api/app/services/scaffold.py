@@ -43,11 +43,20 @@ def ensure_test_ownership(
             if (pattern, zone) not in existing and not any(p == pattern for p, _z in ownership):
                 extra.append((pattern, zone))
     if any(prog in commands.lower() for prog in ("npm", "npx", "node ", "yarn", "pnpm")):
-        for pattern, zone in (
+        prefix = _npm_prefix(str(strategy.get("ui", "")))
+        patterns = [
             ("package.json", "frontend"),
             ("package-lock.json", "frontend"),
             ("scripts/**", "frontend"),
-        ):
+        ]
+        if prefix:
+            patterns = [
+                (f"{prefix}/package.json", "frontend"),
+                (f"{prefix}/package-lock.json", "frontend"),
+                (f"{prefix}/scripts/**", "frontend"),
+                *patterns,
+            ]
+        for pattern, zone in patterns:
             if not any(p == pattern for p, _z in ownership):
                 extra.append((pattern, zone))
     return [*ownership, *extra]
@@ -79,9 +88,12 @@ def scaffold_writes(
                 continue
             target = _pytest_target(command)
             if target:
+                # Unique basenames — same test_harness.py in unit+integration
+                # collides under pytest import caching.
+                stem = target.rstrip("/").replace("/", "_")
                 writes.append(
                     (
-                        f"{target}/test_harness.py",
+                        f"{target}/test_{stem}_harness.py",
                         (
                             '"""Harness so declared pytest commands collect before feature tests exist."""\n\n'
                             "def test_harness_collects() -> None:\n"
@@ -92,7 +104,12 @@ def scaffold_writes(
 
     if any(token in joined for token in ("npm", "npx", "yarn", "pnpm", "node ")):
         frontend = roots.get("frontend", "frontend")
-        ui_script = "scripts/verify_ui.js"
+        # `npm --prefix <dir> test` needs package.json under <dir>; bare `npm test` at root.
+        prefix = _npm_prefix(commands.get("ui", ""))
+        pkg_dir = prefix or ""
+        ui_script = f"{pkg_dir}/scripts/verify_ui.js" if pkg_dir else "scripts/verify_ui.js"
+        pkg_path = f"{pkg_dir}/package.json" if pkg_dir else "package.json"
+        # npm --prefix <dir> runs scripts with cwd=<dir>; package.json is parent of scripts/.
         writes.append(
             (
                 ui_script,
@@ -100,23 +117,18 @@ def scaffold_writes(
                     "const assert = require('assert');\n"
                     "const fs = require('fs');\n"
                     "const path = require('path');\n"
-                    "assert.ok(fs.existsSync(path.join(__dirname, '..', 'package.json')), "
-                    "'package.json missing');\n"
-                    f"const zone = {json.dumps(frontend)};\n"
-                    "assert.ok(\n"
-                    "  fs.existsSync(zone) || fs.existsSync('web') || fs.existsSync('frontend'),\n"
-                    "  'frontend zone missing'\n"
-                    ");\n"
+                    "const pkg = path.join(__dirname, '..', 'package.json');\n"
+                    "assert.ok(fs.existsSync(pkg), 'package.json missing at ' + pkg);\n"
                     "process.exit(0);\n"
                 ),
             )
         )
         writes.append(
             (
-                "package.json",
+                pkg_path,
                 json.dumps(
                     {
-                        "name": "atelier-project",
+                        "name": "atelier-frontend" if pkg_dir else "atelier-project",
                         "private": True,
                         "scripts": {
                             "test": "node scripts/verify_ui.js",
@@ -155,6 +167,18 @@ def apply_scaffold(
         return []
     workspace.commit("ARCH", "Seed zone layout and test harnesses.", writes, role="system")
     return [relative for relative, _content in writes]
+
+
+def _npm_prefix(command: str) -> str | None:
+    """Return the directory from `npm --prefix <dir> …`, if present."""
+
+    parts = command.split()
+    for index, part in enumerate(parts):
+        if part == "--prefix" and index + 1 < len(parts):
+            return parts[index + 1].strip("'\"").rstrip("/")
+        if part.startswith("--prefix="):
+            return part.split("=", 1)[1].strip("'\"").rstrip("/")
+    return None
 
 
 def _pytest_target(command: str) -> str | None:

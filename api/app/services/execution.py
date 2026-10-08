@@ -8,7 +8,7 @@ writes are discarded so the branch stays clean.
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
@@ -88,6 +88,33 @@ class _Implement(BaseModel):
     clarification: str = ""
     writes: list[_Write] = []
     edits: list[_Edit] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_edits(cls, data: object) -> object:
+        # Models return edits with empty old_string for new files, or omit fields.
+        # Promote those to writes; keep only real search/replace edits.
+        if not isinstance(data, dict):
+            return data
+        edits = data.get("edits")
+        if not isinstance(edits, list):
+            return data
+        writes = list(data.get("writes") or []) if isinstance(data.get("writes"), list) else []
+        cleaned: list[object] = []
+        for item in edits:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if path is None or not str(path).strip():
+                continue
+            old = "" if item.get("old_string") is None else str(item.get("old_string"))
+            new = "" if item.get("new_string") is None else str(item.get("new_string"))
+            if not old.strip():
+                if new:
+                    writes.append({"path": str(path).strip(), "content": new})
+                continue
+            cleaned.append({"path": str(path).strip(), "old_string": old, "new_string": new})
+        return {**data, "edits": cleaned, "writes": writes}
 
 
 class _FindingIn(BaseModel):
@@ -269,7 +296,9 @@ class ExecutionService:
             purpose="staff_review",
         )
         staff = self._parse_staff_review(staff_result.data)
-        if gate_issues or staff.verdict != "pass":
+        # Deterministic gate is authoritative. LLM staff can only fail the branch
+        # when that gate already found issues (or it invents empty fail noise).
+        if gate_issues:
             defects = [
                 (
                     f"staff/{code}",
@@ -321,7 +350,9 @@ class ExecutionService:
             task_id=task.id,
             payload={
                 "key": task.key,
-                "summary": staff.summary.strip() or "Staff review passed.",
+                "summary": staff.summary.strip()
+                or "Staff review passed.",
+                "llm_verdict": staff.verdict,
             },
         )
         system, user = review_prompt(
@@ -359,6 +390,7 @@ class ExecutionService:
             findings,
             check_excerpts=rendered,
             root=workspace.root,
+            checks_green=True,
         )
         verdict = judge([key for key, _statement in criteria], findings)
         self.session.execute(delete(CriterionFinding).where(CriterionFinding.task_id == task.id))

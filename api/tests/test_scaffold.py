@@ -16,8 +16,8 @@ def test_scaffold_writes_zone_dirs_and_harnesses():
     assert "frontend/.gitkeep" in paths
     assert "requirements.txt" in paths
     assert "package.json" in paths
-    assert "tests/unit/test_harness.py" in paths
-    assert "tests/integration/test_harness.py" in paths
+    assert "tests/unit/test_tests_unit_harness.py" in paths
+    assert "tests/integration/test_tests_integration_harness.py" in paths
     assert "scripts/verify_ui.js" in paths
 
 
@@ -33,6 +33,19 @@ def test_ensure_test_ownership_adds_harness_globs():
     assert "tests/**" in globs
     assert "requirements.txt" in globs
     assert "package.json" in globs
+
+
+def test_scaffold_honours_npm_prefix_frontend():
+    ownership = [("backend/**", "backend"), ("frontend/**", "frontend")]
+    strategy = {
+        "unit": "python3 -m pytest backend/tests/unit",
+        "integration": "python3 -m pytest backend/tests/integration",
+        "ui": "npm --prefix frontend test",
+    }
+    paths = {relative for relative, _content in scaffold_writes(ownership, strategy)}
+    assert "frontend/package.json" in paths
+    assert "frontend/scripts/verify_ui.js" in paths
+    assert "backend/tests/unit/test_backend_tests_unit_harness.py" in paths
 
 
 def test_apply_scaffold_commits_on_main(tmp_path: Path):
