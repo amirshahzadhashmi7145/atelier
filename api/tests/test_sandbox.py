@@ -146,6 +146,9 @@ def test_run_checks_rewrites_bare_vitest_to_npm_exec(tmp_path: Path):
         calls.append((list(argv), kwargs["image"]))
         if argv[:1] == ["npm"] and "install" in argv:
             (frontend / "node_modules").mkdir(exist_ok=True)
+        # Sandbox copy should already have Node browser shims for Vitest.
+        assert (root / "frontend" / "vitest.setup.mjs").is_file()
+        assert (root / "frontend" / "vitest.config.mjs").is_file()
         return 0, "ok"
 
     with patch("app.services.checks.run_in_sandbox", side_effect=fake_sandbox):

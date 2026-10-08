@@ -37,6 +37,7 @@ from app.domain.task_machine import (
     transition,
 )
 from app.domain.validation import ALLOWED_ZONES
+from app.domain.zone_infer import infer_zone_from_paths
 from app.domain.zones import require_inside_zone
 from app.errors import DomainError
 from app.gateway.base import LlmClient
@@ -198,6 +199,7 @@ class ExecutionService:
             workspace.start_branch(task.branch_name)
         except RuntimeError as exc:
             raise DomainError(f"The branch diff could not be read: {exc}") from exc
+        self._publish_phase(project, task, "staff")
         weakenings = weakened_tests(diff)
         if weakenings:
             self._send_back(
@@ -342,6 +344,15 @@ class ExecutionService:
                 actor_role="fullstack",
             )
             return self.planning.snapshot(project.id)
+        # Deterministic gate already cleared — do not surface a rejecting LLM
+        # summary as the pass reason (Wirebound logs looked like staff failed).
+        llm_summary = staff.summary.strip()
+        if staff.verdict == "fail" and llm_summary:
+            pass_summary = (
+                "Deterministic staff gate passed; LLM notes recorded separately."
+            )
+        else:
+            pass_summary = llm_summary or "Staff review passed."
         self.planning._event(
             project,
             "staff.passed",
@@ -350,11 +361,12 @@ class ExecutionService:
             task_id=task.id,
             payload={
                 "key": task.key,
-                "summary": staff.summary.strip()
-                or "Staff review passed.",
+                "summary": pass_summary,
                 "llm_verdict": staff.verdict,
+                "llm_summary": llm_summary,
             },
         )
+        self._publish_phase(project, task, "qa")
         system, user = review_prompt(
             task_key=task.key,
             title=task.title,
@@ -415,6 +427,7 @@ class ExecutionService:
                 task_id=task.id,
                 payload={"key": task.key, "summary": "Every criterion passed."},
             )
+            self._publish_phase(project, task, "gate")
             if is_automatic(project.gate_policy, "merge"):
                 return self.accept(project_id, task_id, actor_kind="system")
         elif verdict == "fail":
@@ -939,7 +952,6 @@ class ExecutionService:
         )
         if claimed.rowcount != 1:
             raise DomainError("That task was already claimed.")
-        self.session.commit()
         task.state = TaskState.IN_PROGRESS.value
         self.planning._event(
             project,
@@ -948,7 +960,69 @@ class ExecutionService:
             task_id=task.id,
             payload={"key": task.key, "zone": task.zone},
         )
+        # Persist claim before the long implement call so the Live run UI
+        # and a second click both see in_progress immediately.
+        self._publish_phase(project, task, "claim")
         return task
+
+    def _publish_phase(self, project: Project, task: Task, phase: str) -> None:
+        """Commit a run-phase marker so project polls advance while a run is in flight."""
+
+        self.planning._event(
+            project,
+            "run.phase",
+            actor_kind="system",
+            task_id=task.id,
+            payload={"key": task.key, "phase": phase},
+        )
+        self.session.commit()
+        self.session.expire(project, ["runs", "events", "checks", "tasks", "pull_requests"])
+
+    def _ensure_paths_in_task_zone(
+        self,
+        project: Project,
+        task: Task,
+        rules: list[tuple[str, str]],
+        paths: list[str],
+    ) -> None:
+        """Auto-reassign when every write belongs to one other zone (self-heal)."""
+
+        cleaned = [path.replace("\\", "/").lstrip("./") for path in paths if path.strip()]
+        if not cleaned:
+            return
+        try:
+            for path in cleaned:
+                require_inside_zone(path, task.zone, rules)
+            return
+        except DomainError:
+            target = infer_zone_from_paths(cleaned, rules)
+            if not target or target == task.zone:
+                # Re-raise the first illegal path with the original message.
+                for path in cleaned:
+                    require_inside_zone(path, task.zone, rules)
+                return
+            previous = task.zone
+            task.zone = target
+            self.planning._event(
+                project,
+                "task.reassigned",
+                actor_kind="system",
+                task_id=task.id,
+                payload={
+                    "key": task.key,
+                    "from_zone": previous,
+                    "to_zone": target,
+                    "reason": "writes_owned_by_target_zone",
+                    "paths": cleaned[:8],
+                    "summary": (
+                        f"{task.key} moved from {previous} to {target} because "
+                        "the agent wrote files owned by that zone."
+                    ),
+                },
+            )
+            self.session.commit()
+            for path in cleaned:
+                require_inside_zone(path, task.zone, rules)
 
     def _execute(self, project: Project, task: Task) -> None:
         workspace = Workspace(self._root(project))
@@ -959,6 +1033,7 @@ class ExecutionService:
         except RuntimeError as exc:
             raise DomainError(f"The workspace could not be prepared: {exc}") from exc
         task.branch_name = branch
+        self.session.commit()
         rules = [(rule.glob, rule.zone) for rule in project.ownership]
         budget = RunBudget(
             max_iterations=self.settings.run_max_iterations,
@@ -984,6 +1059,8 @@ class ExecutionService:
                 workspace_tree=self._workspace_tree(workspace.root),
                 existing_sources=self._existing_sources(workspace.root, task.zone, rules),
             )
+            # Publish before the model call — that is the long wait.
+            self._publish_phase(project, task, "implement")
             result = self.llm.complete_json(purpose="implement", system=system, user=user)
             run_id = self._record_run(
                 project, task, result.provider, result.model, result.input_tokens, result.output_tokens
@@ -1014,10 +1091,13 @@ class ExecutionService:
                 )
             elif signature == previous:
                 raise DomainError("The agent repeated the same change. The run was stopped.")
-            for item in parsed.writes:
-                require_inside_zone(item.path, task.zone, rules)
-            for item in parsed.edits:
-                require_inside_zone(item.path, task.zone, rules)
+            self._ensure_paths_in_task_zone(
+                project,
+                task,
+                rules,
+                [item.path for item in parsed.writes]
+                + [item.path for item in parsed.edits],
+            )
             if not parsed.done:
                 # Models often return writes with done=false and burn the iteration
                 # budget without ever committing. Treat in-zone writes as finished.
@@ -1098,6 +1178,7 @@ class ExecutionService:
                 workspace.apply(writes)
             except RuntimeError as exc:
                 raise DomainError(f"The branch could not be written: {exc}") from exc
+            self._publish_phase(project, task, "checks")
             try:
                 checks = run_checks(
                     workspace.root,
@@ -1112,6 +1193,8 @@ class ExecutionService:
                     raise DomainError(f"The failed change could not be discarded: {exc}") from exc
                 raise
             self._replace_checks(project, task, checks)
+            self.session.commit()
+            self.session.expire(project, ["checks", "defects"])
             failed_checks = [item for item in checks if item.exit_code != 0]
             if failed_checks:
                 try:
@@ -1193,6 +1276,9 @@ class ExecutionService:
             task_id=task.id,
             payload={"key": task.key, "branch": branch, "summary": summary},
         )
+        # Staff/QA still run in this request when merge is automatic — surface
+        # in_review before those LLM calls so the Live run rail can move.
+        self._publish_phase(project, task, "staff")
         self._open_pull_request(project, task, workspace, summary, passed_checks)
 
     def _close_routed_defect_tasks(self, project: Project, task: Task) -> None:

@@ -96,6 +96,10 @@ def tasks_prompt(context: str) -> tuple[str, str]:
         "A task with no unmet dependency uses an empty depends_on list. "
         "Every task MUST include at least one requirement_indexes entry; "
         "never leave requirement_indexes empty. "
+        "Zone rules: Vite/TypeScript/package.json/HUD/Canvas/DOM/settings/pause/"
+        "animation/sound tasks are frontend. API/server/database/pytest tasks are "
+        "backend. Put technology-stack setup early and on frontend when it touches "
+        "package.json or Vite. "
         + JSON_RULES
         + "\nShape: {"
         '"tasks": [{"title": string, "description": string, '

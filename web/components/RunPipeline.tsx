@@ -15,6 +15,28 @@ export type RunStepId = (typeof RUN_STEPS)[number]["id"];
 
 type StepStatus = "done" | "active" | "pending" | "failed";
 
+const PHASE_INDEX: Record<string, number> = {
+  claim: 0,
+  implement: 1,
+  checks: 2,
+  staff: 3,
+  qa: 4,
+  gate: 5,
+};
+
+function latestRunPhase(events: Snapshot["events"], taskKey: string): string | null {
+  // Snapshot events are newest-first.
+  for (const event of events) {
+    if (event.type !== "run.phase") continue;
+    const key = event.payload?.key;
+    const phase = event.payload?.phase;
+    if (key === taskKey && typeof phase === "string" && phase in PHASE_INDEX) {
+      return phase;
+    }
+  }
+  return null;
+}
+
 export function deriveRunProgress(snapshot: Snapshot, busy: boolean) {
   const active =
     snapshot.tasks.find((task) => task.state === "in_progress") ??
@@ -37,8 +59,11 @@ export function deriveRunProgress(snapshot: Snapshot, busy: boolean) {
   const taskRuns = active
     ? snapshot.runs.filter((run) => run.task_id === active.id)
     : [];
-  const hasImplement = taskRuns.some((run) => run.purpose === "implement");
+  const hasImplement =
+    taskRuns.some((run) => run.purpose === "implement") || types.has("agent.implement");
   const hasChecks = snapshot.checks.some((check) => check.task_id === active?.id);
+  const phase = active ? latestRunPhase(snapshot.events, active.key) : null;
+  const phaseIndex = phase ? PHASE_INDEX[phase] : null;
   const staffFailed = types.has("staff.failed");
   const qaFailed = types.has("qa.failed") || types.has("qa.rejected_untestable");
   const taskFailed = types.has("task.failed");
@@ -47,11 +72,14 @@ export function deriveRunProgress(snapshot: Snapshot, busy: boolean) {
   if (!active && busy) {
     currentIndex = 0;
   } else if (active?.state === "in_progress") {
-    if (hasChecks) currentIndex = 2;
-    else if (hasImplement) currentIndex = 1;
+    if (phaseIndex != null && phaseIndex <= 2) currentIndex = phaseIndex;
+    else if (hasChecks || phase === "checks") currentIndex = 2;
+    else if (hasImplement || phase === "implement") currentIndex = 1;
     else currentIndex = 0;
   } else if (active?.state === "in_review") {
-    if (types.has("staff.passed") || types.has("qa.untestable") || types.has("qa.passed")) {
+    if (phaseIndex != null && phaseIndex >= 3) {
+      currentIndex = phaseIndex;
+    } else if (types.has("staff.passed") || types.has("qa.untestable") || types.has("qa.passed")) {
       currentIndex = types.has("qa.untestable") || types.has("qa.passed") ? 4 : 3;
     } else if (staffFailed) {
       currentIndex = 3;

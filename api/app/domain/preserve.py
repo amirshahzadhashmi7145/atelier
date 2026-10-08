@@ -9,6 +9,8 @@ search/replace on the existing file.
 from __future__ import annotations
 
 import ast
+import codecs
+import json
 import re
 from pathlib import Path
 
@@ -165,6 +167,92 @@ def is_protected_scaffold_path(relative: str) -> bool:
     return False
 
 
+def normalize_package_json(content: str) -> str:
+    """Turn double-encoded / escaped package.json blobs into real JSON.
+
+    Models often write the file as a JSON string with literal ``\\n`` / ``\\"``
+    instead of an object. npm then fails with EJSONPARSE. Peel encodings and
+    re-serialize a dict, or raise ValueError if repair is impossible.
+    """
+
+    text = content.strip()
+    if not text:
+        raise ValueError("package.json is empty.")
+    candidates = [text]
+    # Common: whole file is one JSON string value containing the manifest.
+    try:
+        once = json.loads(text)
+        if isinstance(once, str) and once.strip():
+            candidates.append(once.strip())
+    except json.JSONDecodeError:
+        pass
+    # Common: object text with literal backslash-n / backslash-quote sequences.
+    if "\\n" in text or '\\"' in text:
+        try:
+            unescaped = codecs.decode(text, "unicode_escape")
+            if unescaped.strip() and unescaped.strip() not in candidates:
+                candidates.append(unescaped.strip())
+        except (UnicodeError, ValueError):
+            pass
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        # Peel nested string encodings a few times.
+        for _ in range(3):
+            if isinstance(parsed, str):
+                try:
+                    parsed = json.loads(parsed)
+                except json.JSONDecodeError as exc:
+                    last_error = exc
+                    parsed = None
+                    break
+            else:
+                break
+        if isinstance(parsed, dict):
+            return json.dumps(parsed, indent=2) + "\n"
+        last_error = ValueError("package.json must be a JSON object.")
+
+    detail = f" ({last_error})" if last_error else ""
+    raise ValueError(
+        "package.json is not valid JSON — write a real object, not a string "
+        f"with \\n/\\\" escapes.{detail}"
+    )
+
+
+def merge_package_json(previous: str, proposed: str) -> str:
+    """Keep harness scripts/deps when a rewrite drops them."""
+
+    normalized = normalize_package_json(proposed)
+    try:
+        old = json.loads(previous)
+        new = json.loads(normalized)
+    except json.JSONDecodeError:
+        return normalized
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return normalized
+    scripts = new.setdefault("scripts", {})
+    if not isinstance(scripts, dict):
+        scripts = {}
+        new["scripts"] = scripts
+    for key, value in (old.get("scripts") or {}).items():
+        if key not in scripts and isinstance(value, str):
+            scripts[key] = value
+    for field in ("devDependencies", "dependencies"):
+        bucket = new.setdefault(field, {})
+        if not isinstance(bucket, dict):
+            bucket = {}
+            new[field] = bucket
+        for key, value in (old.get(field) or {}).items():
+            if key not in bucket:
+                bucket[key] = value
+    return json.dumps(new, indent=2) + "\n"
+
+
 def materialize_writes(
     root: Path,
     writes: list[tuple[str, str]],
@@ -229,6 +317,19 @@ def materialize_writes(
                 previous = ""
             if previous:
                 content = merge_keeping_js_exports(previous, content)
+        elif rel.endswith("package.json"):
+            try:
+                previous = path.read_text(encoding="utf-8") if path.is_file() else ""
+            except OSError:
+                previous = ""
+            try:
+                content = (
+                    merge_package_json(previous, content)
+                    if previous.strip()
+                    else normalize_package_json(content)
+                )
+            except ValueError as exc:
+                raise ValueError(f"{rel}: {exc}") from exc
         out.append((rel, content))
     return out
 

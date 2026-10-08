@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
 
 from app.domain.preserve import (
     materialize_writes,
     merge_keeping_js_exports,
     merge_keeping_symbols,
+    merge_package_json,
     missing_from_rewrites,
+    normalize_package_json,
     removed_js_exports,
     removed_symbols,
 )
@@ -140,3 +143,48 @@ def test_materialize_keeps_js_exports_on_clobber(tmp_path: Path):
     assert "formatProgress" in content
     assert "renderEndlessHud" in content
     assert "formatLevel" in content
+
+
+def test_normalize_package_json_repairs_literal_escapes():
+    broken = '{\\n  \\"name\\": \\"my-app\\",\\n  \\"private\\": true\\n}\\n'
+    fixed = normalize_package_json(broken)
+    data = json.loads(fixed)
+    assert data["name"] == "my-app"
+    assert data["private"] is True
+
+
+def test_normalize_package_json_peels_json_string_wrapper():
+    inner = '{"name":"my-app","private":true}'
+    wrapped = json.dumps(inner)  # "\"{\\\"name\\\":...}\"" style via json.dumps of a string
+    # Actually json.dumps(inner) produces a quoted string with escapes — that's the bug shape.
+    fixed = normalize_package_json(json.dumps(inner))
+    assert json.loads(fixed)["name"] == "my-app"
+
+
+def test_materialize_repairs_and_keeps_harness_scripts(tmp_path: Path):
+    path = tmp_path / "frontend" / "package.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '{\n  "name": "atelier-frontend",\n  "scripts": {\n'
+        '    "test": "node scripts/verify_ui.js",\n'
+        '    "test:unit": "node ./node_modules/vitest/vitest.mjs --run"\n'
+        "  },\n"
+        '  "devDependencies": {"vitest": "^3.0.0"}\n}\n',
+        encoding="utf-8",
+    )
+    broken = '{\\n  \\"name\\": \\"my-app\\",\\n  \\"private\\": true\\n}\\n'
+    writes = materialize_writes(tmp_path, [("frontend/package.json", broken)], [])
+    content = dict(writes)["frontend/package.json"]
+    data = json.loads(content)
+    assert data["name"] == "my-app"
+    assert data["scripts"]["test:unit"]
+    assert "vitest" in data["devDependencies"]
+
+
+def test_merge_package_json_keeps_scripts():
+    previous = '{"scripts":{"test:unit":"vitest"},"devDependencies":{"vitest":"^3"}}'
+    proposed = '{"name":"x","scripts":{"dev":"vite"}}'
+    merged = json.loads(merge_package_json(previous, proposed))
+    assert merged["scripts"]["dev"] == "vite"
+    assert merged["scripts"]["test:unit"] == "vitest"
+    assert merged["devDependencies"]["vitest"] == "^3"
