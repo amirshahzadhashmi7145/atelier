@@ -2,8 +2,10 @@ from pathlib import Path
 
 from app.domain.preserve import (
     materialize_writes,
+    merge_keeping_js_exports,
     merge_keeping_symbols,
     missing_from_rewrites,
+    removed_js_exports,
     removed_symbols,
 )
 
@@ -102,3 +104,39 @@ def test_materialize_keeps_verify_ui_scaffold(tmp_path: Path):
     by_path = dict(writes)
     assert by_path["frontend/scripts/verify_ui.js"] == original
     assert "Hud" in by_path["frontend/src/Hud.js"]
+
+
+def test_merge_keeping_js_exports_restores_hud_helpers():
+    previous = (
+        "export function formatLevel(n) { return `Current Level: ${n}`; }\n"
+        "export function formatProgress(a, b) { return `Progress: ${a} / ${b}`; }\n"
+        "export function renderEndlessHud(el, opts) { el.textContent = 'x'; }\n"
+    )
+    proposed = (
+        "export function formatLevel(n) { return `Current Level: ${n}`; }\n"
+        "export function maxHintsLabel(n) { return `Max hints: ${n}`; }\n"
+    )
+    assert removed_js_exports(previous, proposed) == ["formatProgress", "renderEndlessHud"]
+    merged = merge_keeping_js_exports(previous, proposed)
+    assert "export function formatProgress" in merged
+    assert "export function renderEndlessHud" in merged
+    assert "maxHintsLabel" in merged
+
+
+def test_materialize_keeps_js_exports_on_clobber(tmp_path: Path):
+    path = tmp_path / "frontend" / "src" / "hud.mjs"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "export function formatProgress(a, b) { return `${a}/${b}`; }\n"
+        "export function renderEndlessHud(el) { return el; }\n",
+        encoding="utf-8",
+    )
+    writes = materialize_writes(
+        tmp_path,
+        [("frontend/src/hud.mjs", "export function formatLevel(n) { return String(n); }\n")],
+        [],
+    )
+    content = dict(writes)["frontend/src/hud.mjs"]
+    assert "formatProgress" in content
+    assert "renderEndlessHud" in content
+    assert "formatLevel" in content

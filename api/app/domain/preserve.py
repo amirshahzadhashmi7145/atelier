@@ -9,7 +9,18 @@ search/replace on the existing file.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
+
+_JS_EXPORT_FN = re.compile(
+    r"^export\s+(?:async\s+)?function\s+(\w+)\s*\([^)]*\)\s*\{",
+    re.MULTILINE,
+)
+_JS_EXPORT_DECL = re.compile(
+    r"^export\s+(?:const|let|var|class)\s+(\w+)\b",
+    re.MULTILINE,
+)
+_JS_SUFFIXES = (".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx")
 
 
 def top_level_symbols(source: str) -> set[str]:
@@ -56,6 +67,80 @@ def merge_keeping_symbols(previous: str, proposed: str) -> str:
             chunks.append(segment.rstrip())
     if not chunks:
         return proposed
+    return proposed.rstrip() + "\n\n" + "\n\n".join(chunks) + "\n"
+
+
+def js_exported_names(source: str) -> set[str]:
+    """Top-level `export function` / `export const` names in a JS/TS module."""
+
+    names = set(_JS_EXPORT_FN.findall(source))
+    names.update(_JS_EXPORT_DECL.findall(source))
+    return names
+
+
+def removed_js_exports(previous: str, proposed: str) -> list[str]:
+    return sorted(js_exported_names(previous) - js_exported_names(proposed))
+
+
+def _extract_js_export_block(source: str, name: str) -> str | None:
+    """Return the source of one exported function/const/class named `name`."""
+
+    for match in _JS_EXPORT_FN.finditer(source):
+        if match.group(1) != name:
+            continue
+        start = match.start()
+        brace = source.find("{", match.end() - 1)
+        if brace < 0:
+            return None
+        depth = 0
+        for index in range(brace, len(source)):
+            char = source[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[start : index + 1].rstrip()
+        return None
+    for match in _JS_EXPORT_DECL.finditer(source):
+        if match.group(1) != name:
+            continue
+        start = match.start()
+        # const/let/var: take through the terminating semicolon at depth 0.
+        depth = 0
+        in_string: str | None = None
+        for index in range(start, len(source)):
+            char = source[index]
+            if in_string:
+                if char == in_string and source[index - 1] != "\\":
+                    in_string = None
+                continue
+            if char in {'"', "'", "`"}:
+                in_string = char
+                continue
+            if char in "{[(":
+                depth += 1
+            elif char in "}])":
+                depth = max(0, depth - 1)
+            elif char == ";" and depth == 0:
+                return source[start : index + 1].rstrip()
+        return source[start:].rstrip()
+    return None
+
+
+def merge_keeping_js_exports(previous: str, proposed: str) -> str:
+    """Append exported helpers a JS rewrite dropped (keeps prior Vitest imports green)."""
+
+    dropped = removed_js_exports(previous, proposed)
+    if not dropped:
+        return proposed
+    chunks: list[str] = []
+    for name in dropped:
+        block = _extract_js_export_block(previous, name)
+        if block:
+            chunks.append(block)
+    if not chunks:
+        return previous
     return proposed.rstrip() + "\n\n" + "\n\n".join(chunks) + "\n"
 
 
@@ -137,6 +222,13 @@ def materialize_writes(
                 # (or edit result) would still drop names vs the pre-edit file.
                 # Use pre-materialize disk text so we never lose TASK-001 helpers.
                 content = merge_keeping_symbols(previous, content)
+        elif path.is_file() and rel.endswith(_JS_SUFFIXES):
+            try:
+                previous = path.read_text(encoding="utf-8")
+            except OSError:
+                previous = ""
+            if previous:
+                content = merge_keeping_js_exports(previous, content)
         out.append((rel, content))
     return out
 
@@ -149,8 +241,6 @@ def missing_from_rewrites(
 
     reasons: list[str] = []
     for relative, content in writes:
-        if not relative.endswith(".py"):
-            continue
         path = root / relative
         if not path.is_file():
             continue
@@ -158,11 +248,18 @@ def missing_from_rewrites(
             previous = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        dropped = removed_symbols(previous, content)
+        if relative.endswith(".py"):
+            dropped = removed_symbols(previous, content)
+            label = "endpoints and helpers"
+        elif relative.endswith(_JS_SUFFIXES):
+            dropped = removed_js_exports(previous, content)
+            label = "exports"
+        else:
+            continue
         if not dropped:
             continue
         reasons.append(
-            f"{relative} removes {', '.join(dropped)}. Keep prior endpoints and "
-            "helpers; add new code beside them."
+            f"{relative} removes {', '.join(dropped)}. Keep prior {label}; "
+            "add new code beside them."
         )
     return reasons
